@@ -6,3 +6,4 @@ publish/
 .vs/
 *.nupkg
 run.cmd
+gitcmd.cmd
