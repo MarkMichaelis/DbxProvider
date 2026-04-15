@@ -1,0 +1,274 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Configuration>
+  <!-- DropboxItem formatting -->
+  <ViewDefinitions>
+    <View>
+      <Name>DropboxItem</Name>
+      <ViewSelectedBy>
+        <TypeName>DbxProvider.Models.DropboxItem</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader>
+            <Label>Mode</Label>
+            <Width>6</Width>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>Size</Label>
+            <Width>12</Width>
+            <Alignment>Right</Alignment>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>Modified</Label>
+            <Width>20</Width>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>Name</Label>
+          </TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem>
+                <ScriptBlock>if ($_.IsFolder) { "d----" } else { "-a---" }</ScriptBlock>
+              </TableColumnItem>
+              <TableColumnItem>
+                <PropertyName>DisplaySize</PropertyName>
+              </TableColumnItem>
+              <TableColumnItem>
+                <ScriptBlock>if ($_.ServerModified) { $_.ServerModified.ToString("yyyy-MM-dd HH:mm:ss") } else { "" }</ScriptBlock>
+              </TableColumnItem>
+              <TableColumnItem>
+                <PropertyName>Name</PropertyName>
+              </TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+
+    <!-- DropboxItem list view -->
+    <View>
+      <Name>DropboxItemList</Name>
+      <ViewSelectedBy>
+        <TypeName>DbxProvider.Models.DropboxItem</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Name</PropertyName></ListItem>
+              <ListItem><PropertyName>Path</PropertyName></ListItem>
+              <ListItem><PropertyName>ItemType</PropertyName></ListItem>
+              <ListItem><PropertyName>DisplaySize</PropertyName></ListItem>
+              <ListItem><PropertyName>ServerModified</PropertyName></ListItem>
+              <ListItem><PropertyName>ClientModified</PropertyName></ListItem>
+              <ListItem><PropertyName>Rev</PropertyName></ListItem>
+              <ListItem><PropertyName>ContentHash</PropertyName></ListItem>
+              <ListItem><PropertyName>Id</PropertyName></ListItem>
+              <ListItem><PropertyName>IsDownloadable</PropertyName></ListItem>
+              <ListItem><PropertyName>SharedFolderId</PropertyName></ListItem>
+              <ListItem><PropertyName>HasExplicitSharedMembers</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+
+    <!-- DropboxRevision formatting -->
+    <View>
+      <Name>DropboxRevision</Name>
+      <ViewSelectedBy>
+        <TypeName>DbxProvider.Models.DropboxRevision</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Rev</Label><Width>15</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Size</Label><Width>12</Width><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>ServerModified</Label><Width>20</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Name</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Rev</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Size</PropertyName></TableColumnItem>
+              <TableColumnItem>
+                <ScriptBlock>if ($_.ServerModified) { $_.ServerModified.ToString("yyyy-MM-dd HH:mm:ss") } else { "" }</ScriptBlock>
+              </TableColumnItem>
+              <TableColumnItem><PropertyName>Name</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+
+    <!-- DropboxSharedLink formatting -->
+    <View>
+      <Name>DropboxSharedLink</Name>
+      <ViewSelectedBy>
+        <TypeName>DbxProvider.Models.DropboxSharedLink</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Name</Label><Width>30</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Visibility</Label><Width>12</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Url</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Name</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Visibility</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Url</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+
+    <!-- DropboxSharedFolder formatting -->
+    <View>
+      <Name>DropboxSharedFolder</Name>
+      <ViewSelectedBy>
+        <TypeName>DbxProvider.Models.DropboxSharedFolder</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Name</Label><Width>30</Width></TableColumnHeader>
+          <TableColumnHeader><Label>AccessType</Label><Width>12</Width></TableColumnHeader>
+          <TableColumnHeader><Label>SharedFolderId</Label><Width>20</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Path</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Name</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>AccessType</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>SharedFolderId</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>PathLower</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+
+    <!-- DropboxMember formatting -->
+    <View>
+      <Name>DropboxMember</Name>
+      <ViewSelectedBy>
+        <TypeName>DbxProvider.Models.DropboxMember</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>DisplayName</Label><Width>25</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Email</Label><Width>30</Width></TableColumnHeader>
+          <TableColumnHeader><Label>AccessLevel</Label><Width>15</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Inherited</Label><Width>10</Width></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>DisplayName</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Email</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>AccessLevel</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>IsInherited</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+
+    <!-- DropboxAccount formatting -->
+    <View>
+      <Name>DropboxAccount</Name>
+      <ViewSelectedBy>
+        <TypeName>DbxProvider.Models.DropboxAccount</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>DisplayName</PropertyName></ListItem>
+              <ListItem><PropertyName>Email</PropertyName></ListItem>
+              <ListItem><PropertyName>AccountType</PropertyName></ListItem>
+              <ListItem><PropertyName>Country</PropertyName></ListItem>
+              <ListItem><PropertyName>Locale</PropertyName></ListItem>
+              <ListItem><PropertyName>AccountId</PropertyName></ListItem>
+              <ListItem><PropertyName>IsPaired</PropertyName></ListItem>
+              <ListItem><PropertyName>ReferralLink</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+
+    <!-- DropboxSpaceUsage formatting -->
+    <View>
+      <Name>DropboxSpaceUsage</Name>
+      <ViewSelectedBy>
+        <TypeName>DbxProvider.Models.DropboxSpaceUsage</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>UsedDisplay</PropertyName></ListItem>
+              <ListItem><PropertyName>AllocatedDisplay</PropertyName></ListItem>
+              <ListItem><PropertyName>PercentUsed</PropertyName></ListItem>
+              <ListItem><PropertyName>AllocationLabel</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+
+    <!-- DropboxSearchResult formatting -->
+    <View>
+      <Name>DropboxSearchResult</Name>
+      <ViewSelectedBy>
+        <TypeName>DbxProvider.Models.DropboxSearchResult</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>MatchType</Label><Width>18</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Type</Label><Width>6</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Name</Label><Width>30</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Path</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>MatchType</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>if ($_.Item.IsFolder) { "Folder" } else { "File" }</ScriptBlock></TableColumnItem>
+              <TableColumnItem><ScriptBlock>$_.Item.Name</ScriptBlock></TableColumnItem>
+              <TableColumnItem><ScriptBlock>$_.Item.Path</ScriptBlock></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+
+    <!-- DropboxTag formatting -->
+    <View>
+      <Name>DropboxTag</Name>
+      <ViewSelectedBy>
+        <TypeName>DbxProvider.Models.DropboxTag</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Path</Label><Width>40</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Tag</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Path</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>TagText</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+  </ViewDefinitions>
+</Configuration>
