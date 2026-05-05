@@ -160,12 +160,12 @@ try {
     }
 
     Invoke-Step "dotnet build ($Configuration)" {
-        # DbxSkipHelpBuild=true: the platyPS help-completeness gate is a
-        # separate authoring concern from this test harness. The markdown
-        # under docs/help/en-US/ is currently scaffold (stub) only; gating
-        # tests on it would block every run. The help build can be
-        # re-enabled by pwsh build/Build-Help.ps1 once authoring lands.
-        dotnet build $solution -c $Configuration --nologo -p:DbxSkipHelpBuild=true
+        # The csproj has an AfterTargets="Build" target that compiles
+        # docs/help/en-US/*.md into MAML next to the DLL via Build-Help.ps1.
+        # Help.Tests.ps1 depends on that MAML, so we must NOT pass
+        # DbxSkipHelpBuild=true here -- the help-completeness gate is part
+        # of the test surface.
+        dotnet build $solution -c $Configuration --nologo
     }
     if ($exitCodes[-1] -ne 0) {
         throw "dotnet build failed with exit code $($exitCodes[-1])."
