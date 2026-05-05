@@ -15,6 +15,8 @@ Searches for files and folders by name or content in Dropbox.
 
 ```
 Search-Dropbox [-Query] <String> [-Path <String>] [-MaxResults <Int32>] [-IncludeHighlights]
+ [-FilenameOnly] [-FileExtensions <String[]>] [-FileCategory <String[]>]
+ [-FileStatus <String>] [-OrderBy <String>] [-Wildcard]
  [-DriveName <String>] [-ProgressAction <ActionPreference>] [<CommonParameters>]
 ```
 
@@ -24,6 +26,13 @@ Calls the Dropbox `files/search_v2` endpoint with the given query and
 returns matching items as `DropboxSearchResult` objects. The search
 covers file and folder names; depending on the indexer state Dropbox
 may also match file contents for supported types.
+
+**Note:** Dropbox search is *prefix-token-based*, not glob. Filenames are
+split into tokens on punctuation and whitespace, and each query token is
+matched as a prefix against a filename token. `*` and `?` in `-Query`
+are treated as literal characters and effectively ignored. Use
+`-FileExtensions` for true extension filtering, or `-Wildcard` to apply
+PowerShell wildcard semantics on top of the search results.
 
 Use `-Path` to restrict the search to a subtree, `-MaxResults` to
 cap the page size, and `-IncludeHighlights` to receive snippet
@@ -150,6 +159,114 @@ Aliases:
 Required: True
 Position: 0
 Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -FilenameOnly
+
+Restrict matching to filenames; skip file content indexing. Faster and
+avoids false positives from document contents. Does NOT enable
+wildcards (Dropbox search is prefix-token-based; use `-Wildcard` for
+PowerShell wildcard semantics).
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -FileExtensions
+
+Server-side filter on file extensions (e.g. `pdf`, `docx`). This is the
+correct way to do an `*.docx`-style filter — `-Query "*.docx"` will not
+work because Dropbox treats `*` as a literal token character.
+
+```yaml
+Type: String[]
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -FileCategory
+
+Server-side filter on Dropbox file categories. Valid values:
+`Image`, `Document`, `Pdf`, `Spreadsheet`, `Presentation`, `Audio`,
+`Video`, `Folder`, `Paper`, `Others`.
+
+```yaml
+Type: String[]
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -FileStatus
+
+Search active or deleted files. Valid values: `Active`, `Deleted`.
+Defaults to `Active`.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: Active
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -OrderBy
+
+Result ordering. Valid values: `Relevance`, `LastModifiedTime`. Defaults
+to `Relevance`.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: Relevance
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Wildcard
+
+Treat `-Query` as a PowerShell wildcard pattern (`*`, `?`, `[abc]`).
+Implies `-FilenameOnly`. Tokens are derived from the pattern for the
+server-side query, then results are post-filtered with
+`WildcardPattern` to enforce true PowerShell glob semantics.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
 Accept pipeline input: False
 Accept wildcard characters: False
 ```

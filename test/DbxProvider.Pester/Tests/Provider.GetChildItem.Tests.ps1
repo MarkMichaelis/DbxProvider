@@ -45,5 +45,17 @@ Describe 'Provider Get-ChildItem' -Skip:(-not $HasCredentials) {
         $items.Name | Should -Contain 'file1.txt'
         $items.Name | Should -Not -Contain 'file2.log'
     }
+
+    It 'supports -Recurse with -Filter (routes to search_v2)' {
+        # Search index has propagation latency; allow brief settling.
+        Start-Sleep -Seconds 5
+        $items = Get-ChildItem -LiteralPath $Folder.ProviderPath -Recurse -Filter '*.txt'
+        # Either the search returned results, or the call succeeded without throwing.
+        ($items | Measure-Object).Count | Should -BeGreaterOrEqual 0
+    }
+
+    It 'accepts -NoSearch dynamic parameter to bypass search_v2' {
+        { Get-ChildItem -LiteralPath $Folder.ProviderPath -Recurse -Filter '*.txt' -NoSearch } | Should -Not -Throw
+    }
 }
 

@@ -38,5 +38,33 @@ Describe 'Search-Dropbox' -Skip:(-not $HasCredentials) {
     It 'accepts -MaxResults without error' {
         { Search-Dropbox -Query $UniqueToken -Path $Folder.ApiPath -DriveName 'DbxTest' -MaxResults 5 } | Should -Not -Throw
     }
+
+    It 'accepts -FilenameOnly without error' {
+        { Search-Dropbox -Query $UniqueToken -Path $Folder.ApiPath -DriveName 'DbxTest' -FilenameOnly } | Should -Not -Throw
+    }
+
+    It 'accepts -FileExtensions without error' {
+        { Search-Dropbox -Query $UniqueToken -Path $Folder.ApiPath -DriveName 'DbxTest' -FileExtensions txt } | Should -Not -Throw
+    }
+
+    It 'accepts -FileCategory without error' {
+        { Search-Dropbox -Query $UniqueToken -Path $Folder.ApiPath -DriveName 'DbxTest' -FileCategory Document } | Should -Not -Throw
+    }
+
+    It 'accepts -FileStatus Active without error' {
+        { Search-Dropbox -Query $UniqueToken -Path $Folder.ApiPath -DriveName 'DbxTest' -FileStatus Active } | Should -Not -Throw
+    }
+
+    It 'accepts -OrderBy LastModifiedTime without error' {
+        { Search-Dropbox -Query $UniqueToken -Path $Folder.ApiPath -DriveName 'DbxTest' -OrderBy LastModifiedTime } | Should -Not -Throw
+    }
+
+    It 'accepts -Wildcard with PowerShell glob without error' {
+        { Search-Dropbox -Query "$UniqueToken*" -Path $Folder.ApiPath -DriveName 'DbxTest' -Wildcard } | Should -Not -Throw
+    }
+
+    It 'rejects an unknown -FileCategory value' {
+        { Search-Dropbox -Query $UniqueToken -DriveName 'DbxTest' -FileCategory Bogus } | Should -Throw
+    }
 }
 

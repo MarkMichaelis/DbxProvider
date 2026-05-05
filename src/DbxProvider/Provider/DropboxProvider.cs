@@ -13,7 +13,7 @@ namespace DbxProvider.Provider
     /// PowerShell navigation provider for Dropbox.
     /// Supports file system-like operations: cd, dir, cat, copy, move, del, mkdir, etc.
     /// </summary>
-    [CmdletProvider("Dropbox", ProviderCapabilities.ShouldProcess)]
+    [CmdletProvider("Dropbox", ProviderCapabilities.ShouldProcess | ProviderCapabilities.Filter)]
     public class DropboxProvider : NavigationCmdletProvider, IContentCmdletProvider, IPropertyCmdletProvider
     {
         #region Drive Management

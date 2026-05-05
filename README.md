@@ -134,8 +134,58 @@ Disconnect-Dropbox
 
 ### Search
 ```powershell
+# Token search (default): "quarterly" AND "report" as prefix tokens against
+# both filenames and file contents.
 Search-Dropbox "quarterly report"
 Search-Dropbox "budget" -Path "/Finance" -MaxResults 50
+
+# Restrict matching to filenames (skip content indexing — faster)
+Search-Dropbox "budget" -FilenameOnly
+
+# Server-side extension filter — the right way to do "*.docx"
+Search-Dropbox "report" -FileExtensions pdf,docx,xlsx
+
+# Server-side category filter
+Search-Dropbox "kickoff" -FileCategory Document,Paper,Spreadsheet
+
+# Search deleted files
+Search-Dropbox "old-contract" -FileStatus Deleted
+
+# Order by last modified instead of relevance
+Search-Dropbox "invoice" -OrderBy LastModifiedTime
+
+# True PowerShell-wildcard semantics (post-filtered with WildcardPattern)
+Search-Dropbox "*.docx"   -Wildcard
+Search-Dropbox "Q4*.xlsx" -Wildcard -Path /Finance/2025
+```
+
+> **Note on Dropbox search semantics.** `files/search_v2` is *prefix-token-based*,
+> not glob. A query like `"*.docx"` is split on punctuation/wildcards and
+> tokens are prefix-matched against filename tokens (and, by default, file
+> contents). `*` and `?` are treated as literals and effectively ignored.
+> Use `-FileExtensions` for server-side extension filtering, or `-Wildcard`
+> to apply true PowerShell glob semantics on top of the search results.
+
+### Provider performance — when wildcards use search
+
+The provider's `Get-ChildItem`/`Test-Path` automatically route to the indexed
+`search_v2` API when the scope is already a subtree, so you don't have to
+walk every folder yourself:
+
+| Invocation                                  | Route                                   |
+|---------------------------------------------|-----------------------------------------|
+| `dir`                                       | `list_folder`                            |
+| `dir *.dbx` (single folder, leaf wildcard)  | `list_folder` + client-side filter      |
+| `dir -Recurse`                              | `list_folder` (recursive)                |
+| `dir -Recurse *.dbx` / `-Filter *.dbx`      | **`search_v2`** filename-only, post-filtered |
+| `dir Dbx:\**\*.dbx` (deep path wildcard)    | **`search_v2`** scoped to non-wildcard ancestor |
+| `Test-Path Dbx:\**\foo.docx`                | single **`search_v2`** call             |
+
+Use `-NoSearch` to force the list-based path (e.g. right after uploads while
+the search index is still propagating):
+
+```powershell
+Get-ChildItem Dbx:\Finance -Recurse -Filter *.xlsx -NoSearch
 ```
 
 ### File Transfer (Large File Support)
