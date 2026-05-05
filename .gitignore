@@ -7,3 +7,7 @@ publish/
 *.nupkg
 run.cmd
 gitcmd.cmd
+TestResults/
+*.trx
+*.coverage
+test/DbxProvider.Pester/TestResults/

@@ -1,0 +1,43 @@
+name: CI
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      include-large-file-tests:
+        description: Run >150MB upload tests
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      DBX_APP_KEY: ${{ secrets.DBX_APP_KEY }}
+      DBX_APP_SECRET: ${{ secrets.DBX_APP_SECRET }}
+      DBX_REFRESH_TOKEN: ${{ secrets.DBX_REFRESH_TOKEN }}
+      DBX_TEST_MEMBER_EMAIL: ${{ secrets.DBX_TEST_MEMBER_EMAIL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build and test
+        run: |
+          $largeFlag = '${{ inputs.include-large-file-tests }}' -eq 'true'
+          $args = @{ Configuration = 'Release' }
+          if ($largeFlag) { $args.IncludeLargeFileTests = $true }
+          ./build/Build-And-Test.ps1 @args
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            TestResults/**
+            test/DbxProvider.Pester/TestResults/**

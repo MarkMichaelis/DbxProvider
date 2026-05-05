@@ -25,4 +25,20 @@
     </None>
   </ItemGroup>
 
+  <PropertyGroup>
+    <!-- Allow CI / inner-loop scenarios to skip the help build (e.g. when
+         markdown isn't yet authored). Set DbxSkipHelpBuild=true to bypass. -->
+    <DbxSkipHelpBuild Condition="'$(DbxSkipHelpBuild)' == ''">false</DbxSkipHelpBuild>
+  </PropertyGroup>
+
+  <Target Name="BuildDbxHelp" AfterTargets="Build"
+          Condition="'$(DbxSkipHelpBuild)' != 'true'">
+    <PropertyGroup>
+      <_DbxHelpScript>$(MSBuildThisFileDirectory)..\..\build\Build-Help.ps1</_DbxHelpScript>
+    </PropertyGroup>
+    <Message Importance="high" Text="Building DbxProvider help (PlatyPS -&gt; MAML)..." />
+    <Exec Command="pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(_DbxHelpScript)&quot; -Configuration $(Configuration)"
+          WorkingDirectory="$(MSBuildThisFileDirectory)..\.." />
+  </Target>
+
 </Project>

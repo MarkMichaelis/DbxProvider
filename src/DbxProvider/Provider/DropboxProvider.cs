@@ -139,12 +139,38 @@ namespace DbxProvider.Provider
             try
             {
                 var service = GetService();
+
+                // Multi-segment wildcard (e.g. Dbx:\**\foo.docx) — resolve via search_v2.
+                var noSearch = GetNoSearchParams()?.NoSearch.IsPresent == true;
+                if (!noSearch && TrySplitWildcardPath(path, out var scope, out var pattern))
+                {
+                    // If only the leaf has a wildcard, fall through to default
+                    // existence check (PowerShell typically resolves leaf wildcards
+                    // via GetChildItems anyway).
+                    var segments = path.Replace('/', '\\').Split('\\');
+                    int wildcardSegments = segments.Count(s => WildcardPattern.ContainsWildcardCharacters(s));
+                    bool deepWildcard = wildcardSegments > 1
+                        || (wildcardSegments == 1
+                            && !WildcardPattern.ContainsWildcardCharacters(segments.Last()));
+                    if (deepWildcard)
+                    {
+                        var found = service.SearchByFilenameAsync(pattern, scope, 1)
+                            .GetAwaiter().GetResult();
+                        return found.Count > 0;
+                    }
+                }
+
                 return service.ItemExistsAsync(path).GetAwaiter().GetResult();
             }
             catch
             {
                 return false;
             }
+        }
+
+        protected override object ItemExistsDynamicParameters(string path)
+        {
+            return new NoSearchDynamicParameters();
         }
 
         protected override void GetItem(string path)
@@ -183,6 +209,43 @@ namespace DbxProvider.Provider
 
         #region Container Operations (Get-ChildItem)
 
+        /// <summary>
+        /// Splits a provider path that may contain wildcards into the
+        /// non-wildcard ancestor (used as the search scope) and the wildcard
+        /// pattern (used to filter results). Returns false if the path has no
+        /// wildcards.
+        /// </summary>
+        private static bool TrySplitWildcardPath(string path, out string scope, out string pattern)
+        {
+            scope = path ?? "";
+            pattern = "";
+            if (string.IsNullOrEmpty(path)) return false;
+
+            var segments = path.Replace('/', '\\').Split('\\');
+            int firstWildcard = -1;
+            for (int i = 0; i < segments.Length; i++)
+            {
+                if (WildcardPattern.ContainsWildcardCharacters(segments[i]))
+                {
+                    firstWildcard = i;
+                    break;
+                }
+            }
+            if (firstWildcard < 0) return false;
+
+            scope = string.Join("\\", segments.Take(firstWildcard));
+            // Pattern uses only the LAST wildcard segment as the filename pattern.
+            // Intermediate wildcards (Dbx:\**\file) are honored implicitly because
+            // search_v2 is recursive within the scope.
+            pattern = segments.Last();
+            return true;
+        }
+
+        private NoSearchDynamicParameters? GetNoSearchParams()
+        {
+            return DynamicParameters as NoSearchDynamicParameters;
+        }
+
         protected override bool HasChildItems(string path)
         {
             try
@@ -202,6 +265,40 @@ namespace DbxProvider.Provider
             try
             {
                 var service = GetService();
+                var noSearch = GetNoSearchParams()?.NoSearch.IsPresent == true;
+
+                // Route to search_v2 when scope is a subtree AND a wildcard/filter
+                // is present. Single-folder wildcards (e.g. `dir *.dbx`) keep the
+                // list-based path: PowerShell already filters the leaf wildcard
+                // client-side, and search would silently widen the scope.
+                if (!noSearch)
+                {
+                    bool pathHasWildcard = TrySplitWildcardPath(path, out var scope, out var pathPattern);
+                    string? filterPattern = !string.IsNullOrEmpty(Filter) ? Filter : null;
+
+                    if (recurse && (pathHasWildcard || filterPattern != null))
+                    {
+                        var pattern = filterPattern ?? pathPattern;
+                        var searchScope = pathHasWildcard ? scope : path;
+                        WriteVerbose($"Get-ChildItem: routing to search_v2 (scope='{searchScope}', pattern='{pattern}')");
+                        var found = service.SearchByFilenameAsync(pattern, searchScope, 1000)
+                            .GetAwaiter().GetResult();
+                        foreach (var item in found.OrderBy(i => !i.IsFolder).ThenBy(i => i.Name))
+                        {
+                            var providerPath = item.Path.Replace('/', '\\').TrimStart('\\');
+                            WriteItemObject(item, providerPath, item.IsFolder);
+                        }
+                        return;
+                    }
+
+                    if (!recurse && pathHasWildcard && pathPattern != null
+                        && pathPattern.Contains('*') == false && pathPattern.Contains('?') == false)
+                    {
+                        // No-op branch placeholder; PS handles single-folder wildcards.
+                    }
+                }
+
+                WriteVerbose($"Get-ChildItem: routing to list_folder (path='{path}', recurse={recurse})");
                 var items = service.ListFolderAsync(path, recursive: recurse).GetAwaiter().GetResult();
                 foreach (var item in items.OrderBy(i => !i.IsFolder).ThenBy(i => i.Name))
                 {
@@ -214,6 +311,11 @@ namespace DbxProvider.Provider
                 WriteError(new ErrorRecord(ex, "GetChildItemsFailed",
                     ErrorCategory.ReadError, path));
             }
+        }
+
+        protected override object GetChildItemsDynamicParameters(string path, bool recurse)
+        {
+            return new NoSearchDynamicParameters();
         }
 
         protected override void GetChildNames(string path, ReturnContainers returnContainers)
@@ -504,5 +606,16 @@ namespace DbxProvider.Provider
     {
         [Parameter]
         public SwitchParameter AsByteStream { get; set; }
+    }
+
+    /// <summary>
+    /// Dynamic parameter exposed by Get-ChildItem and Test-Path on the Dropbox
+    /// provider. Use -NoSearch to force the list-based path (skipping
+    /// search_v2). Useful right after uploads while the search index lags.
+    /// </summary>
+    public class NoSearchDynamicParameters
+    {
+        [Parameter]
+        public SwitchParameter NoSearch { get; set; }
     }
 }

@@ -15,7 +15,6 @@ namespace DbxProvider.Services
     public class DropboxServiceClient : IDisposable
     {
         private readonly DropboxClient _client;
-        private bool _disposed;
         private const int UploadSessionChunkSize = 8 * 1024 * 1024;
         private const long UploadSessionThreshold = 150L * 1024 * 1024;
 
@@ -184,12 +183,21 @@ namespace DbxProvider.Services
         #region Files - Search
 
         public async Task<List<DropboxSearchResult>> SearchAsync(string query, string path = "",
-            int maxResults = 100, bool includeHighlights = false)
+            int maxResults = 100, bool includeHighlights = false,
+            bool filenameOnly = false,
+            IEnumerable<string>? fileExtensions = null,
+            IEnumerable<FileCategory>? fileCategories = null,
+            FileStatus? fileStatus = null,
+            SearchOrderBy? orderBy = null)
         {
             var options = new SearchOptions(
                 path: string.IsNullOrEmpty(path) ? null : NormalizePath(path),
                 maxResults: (ulong)maxResults,
-                filenameOnly: false);
+                orderBy: orderBy,
+                fileStatus: fileStatus,
+                filenameOnly: filenameOnly,
+                fileExtensions: fileExtensions,
+                fileCategories: fileCategories);
 
             SearchMatchFieldOptions? matchFieldOptions = includeHighlights
                 ? new SearchMatchFieldOptions(includeHighlights: true) : null;
@@ -226,6 +234,79 @@ namespace DbxProvider.Services
                 ProcessMatches(result.Matches);
             }
             return results;
+        }
+
+        /// <summary>
+        /// Filename-only search using a PowerShell wildcard pattern. Dropbox's
+        /// search_v2 is prefix-token-based (not glob), so we derive a token
+        /// query from the pattern, then post-filter the results with
+        /// <see cref="System.Management.Automation.WildcardPattern"/> to enforce
+        /// true PowerShell wildcard semantics.
+        /// </summary>
+        public async Task<List<DropboxItem>> SearchByFilenameAsync(string pattern,
+            string path = "", int maxResults = 1000)
+        {
+            var wildcard = new System.Management.Automation.WildcardPattern(
+                pattern, System.Management.Automation.WildcardOptions.IgnoreCase);
+
+            // Convert PS wildcard pattern to a Dropbox token query: split on
+            // wildcard chars and path/filename separators, keep tokens of >=2
+            // chars (Dropbox prefix-matches tokens). If nothing usable remains,
+            // fall back to listing the path.
+            var tokens = pattern
+                .Split(new[] { '*', '?', '[', ']', '/', '\\', ' ', '.', '_', '-' },
+                    StringSplitOptions.RemoveEmptyEntries)
+                .Where(t => t.Length >= 2)
+                .ToArray();
+
+            // Try to harvest a useful extension filter from a trailing ".ext"
+            // segment of the pattern (only when the extension itself contains
+            // no wildcards).
+            string? extension = null;
+            var lastDot = pattern.LastIndexOf('.');
+            if (lastDot >= 0 && lastDot < pattern.Length - 1)
+            {
+                var tail = pattern.Substring(lastDot + 1);
+                if (tail.IndexOfAny(new[] { '*', '?', '[', ']', '/', '\\' }) < 0
+                    && tail.Length >= 1)
+                {
+                    extension = tail;
+                }
+            }
+
+            var query = tokens.Length > 0 ? string.Join(" ", tokens) : "";
+
+            // If we can't form any query and have no extension, the pattern is
+            // pure wildcards (e.g. "*"); fall back to a recursive listing
+            // filtered client-side.
+            if (string.IsNullOrEmpty(query) && extension == null)
+            {
+                var listed = await ListFolderAsync(path, recursive: true);
+                return listed.Where(i => wildcard.IsMatch(i.Name)).Take(maxResults).ToList();
+            }
+
+            // Some queries (e.g. just an extension token) are too generic for
+            // search_v2. Dropbox requires a non-empty query, so when we only
+            // have an extension filter we still must pass something. Use the
+            // extension as the token in that case.
+            if (string.IsNullOrEmpty(query))
+            {
+                query = extension!;
+            }
+
+            var raw = await SearchAsync(
+                query: query,
+                path: path,
+                maxResults: maxResults,
+                includeHighlights: false,
+                filenameOnly: true,
+                fileExtensions: extension != null ? new[] { extension } : null,
+                orderBy: SearchOrderBy.Relevance.Instance);
+
+            return raw
+                .Where(r => r.Item != null && wildcard.IsMatch(r.Item.Name))
+                .Select(r => r.Item!)
+                .ToList();
         }
 
         #endregion
@@ -701,7 +782,13 @@ namespace DbxProvider.Services
 
         public void Dispose()
         {
-            if (!_disposed) { _client.Dispose(); _disposed = true; }
+            // Intentionally do NOT dispose _client. The Dropbox.Api SDK
+            // (v7.0.0) uses a static shared DefaultHttpClient internally
+            // when no HttpClient is supplied, and DropboxClient.Dispose()
+            // disposes that static singleton. Disposing here would break
+            // every subsequent DropboxClient instance in the process.
+            // The DropboxClient is small and the process exits soon
+            // afterwards in normal usage, so the leak is acceptable.
             GC.SuppressFinalize(this);
         }
     }

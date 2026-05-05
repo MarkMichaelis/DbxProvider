@@ -42,7 +42,12 @@ namespace DbxProvider.Services
         {
             get
             {
-                var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                // Honor $env:LOCALAPPDATA when set so tests can redirect the
+                // credential file to a sandbox directory. Fall back to the
+                // OS-resolved Special Folder for normal use.
+                var root = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+                if (string.IsNullOrEmpty(root))
+                    root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
                 if (string.IsNullOrEmpty(root))
                     root = Path.GetTempPath();
                 return Path.Combine(root, FolderName, FileName);
