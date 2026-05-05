@@ -257,7 +257,7 @@ finally {
     Pop-Location
 }
 
-$failed = $exitCodes | Where-Object { $_ -ne 0 }
+$failed = @($exitCodes | Where-Object { $_ -ne 0 })
 if ($failed.Count -gt 0) {
     Write-Host ""
     Write-Error "One or more steps failed (exit codes: $($exitCodes -join ', '))."
