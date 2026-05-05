@@ -12,3 +12,4 @@ TestResults/
 *.coverage
 test/DbxProvider.Pester/TestResults/
 *.local.ps1
+.worktrees/
