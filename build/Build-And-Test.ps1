@@ -62,11 +62,34 @@ function Test-DropboxSecretsConfigured {
     }
 
     if (Test-Path $moduleDll) {
+        # NOTE: do NOT Add-Type the module DLL here - that locks
+        # bin\Release\net8.0\DbxProvider.dll for the lifetime of this
+        # pwsh process and breaks every subsequent `dotnet build`.
+        # Run the credential probe in a child pwsh so the DLL is
+        # released as soon as the child exits.
         try {
-            Add-Type -Path $moduleDll -ErrorAction SilentlyContinue
-            $stored = [DbxProvider.Services.CredentialStore]::Load()
-            if ($stored -and $stored.AppKey -and $stored.AppSecret -and $stored.RefreshToken) {
-                return @{ Source = "CredentialStore ($([DbxProvider.Services.CredentialStore]::CredentialFilePath))"; Ok = $true }
+            $probe = @'
+param([string]$Dll)
+try {
+    Add-Type -Path $Dll -ErrorAction Stop
+    $stored = [DbxProvider.Services.CredentialStore]::Load()
+    if ($stored -and $stored.AppKey -and $stored.AppSecret -and $stored.RefreshToken) {
+        [pscustomobject]@{ Ok = $true; Path = [DbxProvider.Services.CredentialStore]::CredentialFilePath } | ConvertTo-Json -Compress
+    }
+} catch { }
+'@
+            $probeScript = Join-Path ([System.IO.Path]::GetTempPath()) ("dbx-credprobe-" + [guid]::NewGuid().ToString('N') + ".ps1")
+            Set-Content -LiteralPath $probeScript -Value $probe -Encoding UTF8
+            try {
+                $out = & pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probeScript -Dll $moduleDll 2>$null
+            } finally {
+                Remove-Item -LiteralPath $probeScript -Force -ErrorAction SilentlyContinue
+            }
+            if ($out) {
+                $info = ($out -join "`n").Trim() | ConvertFrom-Json -ErrorAction Stop
+                if ($info.Ok) {
+                    return @{ Source = "CredentialStore ($($info.Path))"; Ok = $true }
+                }
             }
         } catch { }
     }
@@ -178,18 +201,42 @@ try {
     $script:CredOriginalPath = $null
     if ($secretsCheck.Ok -and (Test-Path $moduleDll)) {
         try {
-            Add-Type -Path $moduleDll -ErrorAction SilentlyContinue
-            $stored = [DbxProvider.Services.CredentialStore]::Load()
-            if ($stored) {
+            # IMPORTANT: do NOT Add-Type the module DLL in this parent pwsh
+            # process - that locks bin\Release\net8.0\DbxProvider.dll for
+            # the lifetime of the session and breaks every subsequent
+            # `dotnet build` (MSB3027 "file is locked by PowerShell 7").
+            # Instead, shell out to a child pwsh process for the one-shot
+            # credential read; the child exits and releases the DLL.
+            $loadScript = @'
+param([string]$Dll)
+Add-Type -Path $Dll -ErrorAction Stop
+$stored = [DbxProvider.Services.CredentialStore]::Load()
+$path   = [DbxProvider.Services.CredentialStore]::CredentialFilePath
+[pscustomobject]@{
+    AppKey       = if ($stored) { $stored.AppKey }       else { $null }
+    AppSecret    = if ($stored) { $stored.AppSecret }    else { $null }
+    RefreshToken = if ($stored) { $stored.RefreshToken } else { $null }
+    Path         = $path
+} | ConvertTo-Json -Compress
+'@
+            $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) ("dbx-credload-" + [guid]::NewGuid().ToString('N') + ".ps1")
+            Set-Content -LiteralPath $tempScript -Value $loadScript -Encoding UTF8
+            try {
+                $json = & pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $tempScript -Dll $moduleDll 2>$null
+            } finally {
+                Remove-Item -LiteralPath $tempScript -Force -ErrorAction SilentlyContinue
+            }
+            if ($json) {
+                $stored = $json | ConvertFrom-Json
                 if (-not $env:DBX_APP_KEY       -and $stored.AppKey)       { $env:DBX_APP_KEY       = $stored.AppKey }
                 if (-not $env:DBX_APP_SECRET    -and $stored.AppSecret)    { $env:DBX_APP_SECRET    = $stored.AppSecret }
                 if (-not $env:DBX_REFRESH_TOKEN -and $stored.RefreshToken) { $env:DBX_REFRESH_TOKEN = $stored.RefreshToken }
-            }
-            $script:CredOriginalPath = [DbxProvider.Services.CredentialStore]::CredentialFilePath
-            if (Test-Path -LiteralPath $script:CredOriginalPath) {
-                $script:CredBackupPath = Join-Path ([System.IO.Path]::GetTempPath()) ("dbxprovider-credbak-" + [guid]::NewGuid().ToString('N') + ".bin")
-                Copy-Item -LiteralPath $script:CredOriginalPath -Destination $script:CredBackupPath -Force
-                Write-Host "==> Credentials file backed up to '$script:CredBackupPath' (will be restored after tests)." -ForegroundColor DarkGreen
+                $script:CredOriginalPath = $stored.Path
+                if ($script:CredOriginalPath -and (Test-Path -LiteralPath $script:CredOriginalPath)) {
+                    $script:CredBackupPath = Join-Path ([System.IO.Path]::GetTempPath()) ("dbxprovider-credbak-" + [guid]::NewGuid().ToString('N') + ".bin")
+                    Copy-Item -LiteralPath $script:CredOriginalPath -Destination $script:CredBackupPath -Force
+                    Write-Host "==> Credentials file backed up to '$script:CredBackupPath' (will be restored after tests)." -ForegroundColor DarkGreen
+                }
             }
         } catch {
             Write-Warning "Could not snapshot credentials for restore-after-tests: $_"
