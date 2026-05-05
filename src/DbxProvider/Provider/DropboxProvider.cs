@@ -28,19 +28,26 @@ namespace DbxProvider.Provider
                 return null!;
             }
 
-            var dynParams = DynamicParameters as DropboxDriveParameters;
-            if (dynParams?.AccessToken == null)
-            {
-                WriteError(new ErrorRecord(
-                    new ArgumentException("AccessToken is required. Use -AccessToken parameter."),
-                    "MissingAccessToken", ErrorCategory.InvalidArgument, drive));
-                return null!;
-            }
-
             try
             {
-                var driveInfo = new DropboxDriveInfo(drive, dynParams.AccessToken);
-                // Verify connection
+                DropboxDriveInfo driveInfo;
+                if (drive is DropboxDriveInfo existing && existing.Service != null)
+                {
+                    driveInfo = existing;
+                }
+                else
+                {
+                    var dynParams = DynamicParameters as DropboxDriveParameters;
+                    if (string.IsNullOrEmpty(dynParams?.AccessToken))
+                    {
+                        WriteError(new ErrorRecord(
+                            new ArgumentException("AccessToken is required. Use -AccessToken parameter."),
+                            "MissingAccessToken", ErrorCategory.InvalidArgument, drive));
+                        return null!;
+                    }
+                    driveInfo = new DropboxDriveInfo(drive, dynParams.AccessToken);
+                }
+
                 driveInfo.Service.GetCurrentAccountAsync().GetAwaiter().GetResult();
                 return driveInfo;
             }

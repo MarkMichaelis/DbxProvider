@@ -1,68 +1,148 @@
 using System;
+using System.Globalization;
 using System.Management.Automation;
 using System.Net;
 using System.Text;
-using System.Threading.Tasks;
 using Dropbox.Api;
 using DbxProvider.Provider;
 using DbxProvider.Services;
 
 namespace DbxProvider.Cmdlets
 {
-    /// <summary>Authenticates to Dropbox and creates a PSDrive.</summary>
-    [Cmdlet(VerbsCommunications.Connect, "Dropbox", DefaultParameterSetName = "Token")]
+    /// <summary>
+    /// Authenticates to Dropbox and creates a PSDrive.
+    ///
+    /// Three usage modes:
+    ///  - <c>Connect-Dropbox -AccessToken &lt;token&gt;</c>           : use a short-lived access token directly.
+    ///  - <c>Connect-Dropbox -AppKey &lt;key&gt; [-AppSecret ...]</c> : run the OAuth 2 + PKCE browser flow.
+    ///  - <c>Connect-Dropbox</c>                                     : reuse credentials saved by a prior run.
+    ///
+    /// Credentials (AppKey, AppSecret, RefreshToken) are persisted via <see cref="CredentialStore"/>
+    /// unless <c>-NoSave</c> is specified.
+    /// </summary>
+    [Cmdlet(VerbsCommunications.Connect, "Dropbox", DefaultParameterSetName = OAuthSet)]
     [OutputType(typeof(PSDriveInfo))]
     public class ConnectDropboxCommand : PSCmdlet
     {
-        [Parameter(Mandatory = true, ParameterSetName = "Token", Position = 0)]
+        public const string TokenSet = "Token";
+        public const string OAuthSet = "OAuth";
+        public const int DefaultRedirectPort = 52475;
+
+        [Parameter(Mandatory = true, ParameterSetName = TokenSet, Position = 0)]
         public string AccessToken { get; set; } = string.Empty;
 
-        [Parameter(Mandatory = true, ParameterSetName = "OAuth")]
-        public string AppKey { get; set; } = string.Empty;
+        [Parameter(ParameterSetName = OAuthSet)]
+        public string? AppKey { get; set; }
 
-        [Parameter(ParameterSetName = "OAuth")]
+        [Parameter(ParameterSetName = OAuthSet)]
         public string? AppSecret { get; set; }
+
+        [Parameter(ParameterSetName = OAuthSet)]
+        public string? RefreshToken { get; set; }
+
+        /// <summary>
+        /// Local TCP port the OAuth callback listener binds to. Must match a redirect URI
+        /// registered in the Dropbox App Console (e.g. http://localhost:52475/).
+        /// </summary>
+        [Parameter(ParameterSetName = OAuthSet)]
+        [ValidateRange(1, 65535)]
+        public int RedirectPort { get; set; } = DefaultRedirectPort;
+
+        /// <summary>If specified, do not persist credentials/refresh token after a successful connect.</summary>
+        [Parameter(ParameterSetName = OAuthSet)]
+        public SwitchParameter NoSave { get; set; }
 
         [Parameter]
         public string DriveName { get; set; } = "Dbx";
-
-        [Parameter(ParameterSetName = "RefreshToken")]
-        [Parameter(ParameterSetName = "OAuth")]
-        public string? RefreshToken { get; set; }
 
         protected override void ProcessRecord()
         {
             try
             {
-                string token;
+                DropboxServiceClient service;
+                string? appKey = AppKey;
+                string? appSecret = AppSecret;
+                string? refreshToken = RefreshToken;
+                bool obtainedNewRefreshToken = false;
 
-                if (ParameterSetName == "OAuth" && string.IsNullOrEmpty(RefreshToken))
+                if (ParameterSetName == TokenSet)
                 {
-                    token = RunOAuthFlow();
-                }
-                else if (ParameterSetName == "RefreshToken")
-                {
-                    token = AccessToken;
+                    service = new DropboxServiceClient(AccessToken);
                 }
                 else
                 {
-                    token = AccessToken;
+                    var stored = CredentialStore.Load();
+                    appKey ??= stored?.AppKey;
+                    appSecret ??= stored?.AppSecret;
+                    refreshToken ??= stored?.RefreshToken;
+
+                    if (!string.IsNullOrEmpty(refreshToken) && !string.IsNullOrEmpty(appKey))
+                    {
+                        WriteVerbose("Reusing saved refresh token (no browser flow needed).");
+                        service = new DropboxServiceClient(refreshToken, appKey, appSecret ?? string.Empty);
+                    }
+                    else if (!string.IsNullOrEmpty(appKey))
+                    {
+                        var (newAccessToken, newRefreshToken) = RunOAuthFlow(appKey, appSecret, RedirectPort);
+                        if (!string.IsNullOrEmpty(newRefreshToken))
+                        {
+                            refreshToken = newRefreshToken;
+                            obtainedNewRefreshToken = true;
+                            service = new DropboxServiceClient(newRefreshToken, appKey, appSecret ?? string.Empty);
+                        }
+                        else
+                        {
+                            service = new DropboxServiceClient(newAccessToken);
+                        }
+                    }
+                    else
+                    {
+                        WriteRegistrationHelp(RedirectPort);
+                        throw new InvalidOperationException(
+                            "No credentials available. Provide -AccessToken, or -AppKey (with optional -AppSecret), " +
+                            "or run Set-DropboxCredential to populate the credential store first.");
+                    }
                 }
 
-                // Verify the token works
-                var service = new DropboxServiceClient(token);
                 var account = service.GetCurrentAccountAsync().GetAwaiter().GetResult();
                 WriteVerbose($"Authenticated as {account.DisplayName} ({account.Email})");
 
-                // Create the PSDrive
+                if (ParameterSetName == OAuthSet && !NoSave.IsPresent &&
+                    (!string.IsNullOrEmpty(appKey) || !string.IsNullOrEmpty(refreshToken)))
+                {
+                    CredentialStore.Save(appKey, appSecret, refreshToken);
+                    if (!string.IsNullOrEmpty(CredentialStore.LastSaveWarning))
+                        WriteWarning(CredentialStore.LastSaveWarning);
+                    WriteVerbose($"Credentials saved to {CredentialStore.CredentialFilePath}.");
+                }
+
                 var driveInfo = new PSDriveInfo(
                     DriveName, SessionState.Provider.GetOne("Dropbox"),
                     "\\", $"Dropbox ({account.Email})", null);
 
-                var dbxDrive = new DropboxDriveInfo(driveInfo, token);
+                var dbxDrive = new DropboxDriveInfo(driveInfo, service);
                 SessionState.Drive.New(dbxDrive, "global");
                 WriteObject(dbxDrive);
+
+                // Register a global "<DriveName>:" function so users can switch drives by typing
+                // "Dbx:" alone, matching the FileSystem provider behavior for "C:".
+                try
+                {
+                    SessionState.InvokeCommand.InvokeScript(
+                        false,
+                        ScriptBlock.Create($"Set-Item -Path function:global:{DriveName}: -Value {{ Set-Location -LiteralPath '{DriveName}:' }}"),
+                        null);
+                }
+                catch (Exception ex)
+                {
+                    WriteVerbose($"Could not register '{DriveName}:' shortcut function: {ex.Message}");
+                }
+
                 Host.UI.WriteLine($"Connected to Dropbox as {account.DisplayName}. Use '{DriveName}:' to navigate.");
+                if (obtainedNewRefreshToken && NoSave.IsPresent && !string.IsNullOrEmpty(refreshToken))
+                {
+                    Host.UI.WriteLine($"Refresh token (save for future use): {refreshToken}");
+                }
             }
             catch (Exception ex)
             {
@@ -71,12 +151,11 @@ namespace DbxProvider.Cmdlets
             }
         }
 
-        private string RunOAuthFlow()
+        private (string AccessToken, string? RefreshToken) RunOAuthFlow(string appKey, string? appSecret, int port)
         {
-            var redirectUri = "http://localhost:52475/";
+            var redirectUri = $"http://localhost:{port.ToString(CultureInfo.InvariantCulture)}/";
             var state = Guid.NewGuid().ToString("N");
 
-            // Build PKCE challenge
             var codeVerifier = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
             using var sha256 = System.Security.Cryptography.SHA256.Create();
             var challengeBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(codeVerifier));
@@ -85,7 +164,7 @@ namespace DbxProvider.Cmdlets
 
             var authorizeUri = new Uri(
                 $"https://www.dropbox.com/oauth2/authorize" +
-                $"?client_id={Uri.EscapeDataString(AppKey)}" +
+                $"?client_id={Uri.EscapeDataString(appKey)}" +
                 $"&response_type=code" +
                 $"&redirect_uri={Uri.EscapeDataString(redirectUri)}" +
                 $"&state={state}" +
@@ -93,8 +172,9 @@ namespace DbxProvider.Cmdlets
                 $"&code_challenge_method=S256" +
                 $"&token_access_type=offline");
 
+            WriteRegistrationHelp(port);
             Host.UI.WriteLine("Opening browser for Dropbox authorization...");
-            Host.UI.WriteLine($"If browser doesn't open, visit: {authorizeUri}");
+            Host.UI.WriteLine($"If browser doesn't open, visit: {TerminalHyperlink.Format(authorizeUri.ToString())}");
 
             try
             {
@@ -102,25 +182,87 @@ namespace DbxProvider.Cmdlets
                 { UseShellExecute = true };
                 System.Diagnostics.Process.Start(psi);
             }
-            catch { /* Browser may not open in some environments */ }
+            catch
+            {
+                // Browser may not open in some environments; user can copy the URL.
+            }
 
-            // Start a temporary HTTP listener to receive the callback
             using var listener = new HttpListener();
-            listener.Prefixes.Add(redirectUri);
-            listener.Start();
+            try
+            {
+                listener.Prefixes.Add(redirectUri);
+                listener.Start();
+            }
+            catch (HttpListenerException ex)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to bind OAuth callback listener on {redirectUri}. " +
+                    $"Choose a different port via -RedirectPort and register http://localhost:<port>/ " +
+                    $"in your Dropbox app's redirect URIs. Underlying error: {ex.Message}", ex);
+            }
 
-            Host.UI.WriteLine("Waiting for authorization...");
-            var context = listener.GetContext();
-            var code = context.Request.QueryString["code"];
-            var returnedState = context.Request.QueryString["state"];
+            Host.UI.WriteLine($"Waiting for authorization on {redirectUri} ...");
+            Host.UI.WriteLine("(Press Esc or Ctrl+C to cancel.)");
 
-            // Send response to browser
-            var responseHtml = "<html><body><h2>Authorization successful!</h2><p>You can close this window.</p></body></html>";
-            var buffer = Encoding.UTF8.GetBytes(responseHtml);
-            context.Response.ContentLength64 = buffer.Length;
-            context.Response.OutputStream.Write(buffer, 0, buffer.Length);
-            context.Response.Close();
+            string? code = null;
+            string? returnedState = null;
+            string? errorParam = null;
+
+            // Browsers may probe the listener (favicon, preconnect, HSTS) before delivering the
+            // OAuth redirect. Skip such requests until we see one carrying ?code= or ?error=.
+            while (true)
+            {
+                var contextTask = listener.GetContextAsync();
+                while (!contextTask.IsCompleted)
+                {
+                    if (Stopping)
+                    {
+                        listener.Stop();
+                        throw new OperationCanceledException("OAuth flow cancelled by user (Ctrl+C).");
+                    }
+                    if (TryConsumeEscape())
+                    {
+                        listener.Stop();
+                        throw new OperationCanceledException("OAuth flow cancelled by user (Esc).");
+                    }
+                    if (contextTask.Wait(TimeSpan.FromMilliseconds(150)))
+                        break;
+                }
+
+                var context = contextTask.Result;
+                code = context.Request.QueryString["code"];
+                returnedState = context.Request.QueryString["state"];
+                errorParam = context.Request.QueryString["error"];
+
+                var hasOAuthPayload = !string.IsNullOrEmpty(code) || !string.IsNullOrEmpty(errorParam);
+
+                string responseHtml;
+                if (!hasOAuthPayload)
+                {
+                    // 404 the probe so the browser doesn't cache it as our success page.
+                    context.Response.StatusCode = 404;
+                    responseHtml = "<html><body>Waiting for OAuth callback...</body></html>";
+                }
+                else if (!string.IsNullOrEmpty(errorParam))
+                {
+                    responseHtml = $"<html><body><h2>Authorization failed</h2><p>{WebUtility.HtmlEncode(errorParam)}</p></body></html>";
+                }
+                else
+                {
+                    responseHtml = "<html><body><h2>Authorization successful!</h2><p>You can close this window.</p></body></html>";
+                }
+
+                var buffer = Encoding.UTF8.GetBytes(responseHtml);
+                context.Response.ContentLength64 = buffer.Length;
+                context.Response.OutputStream.Write(buffer, 0, buffer.Length);
+                context.Response.Close();
+
+                if (hasOAuthPayload) break;
+            }
             listener.Stop();
+
+            if (!string.IsNullOrEmpty(errorParam))
+                throw new Exception($"OAuth flow returned error: {errorParam}");
 
             if (returnedState != state)
                 throw new Exception("OAuth state mismatch. Possible CSRF attack.");
@@ -128,16 +270,43 @@ namespace DbxProvider.Cmdlets
             if (string.IsNullOrEmpty(code))
                 throw new Exception("No authorization code received.");
 
-            // Exchange code for token using PKCE flow
             var tokenResult = DropboxOAuth2Helper.ProcessCodeFlowAsync(
-                code, AppKey, AppSecret, redirectUri, null, codeVerifier).GetAwaiter().GetResult();
+                code, appKey, appSecret, redirectUri, null, codeVerifier).GetAwaiter().GetResult();
 
-            if (!string.IsNullOrEmpty(tokenResult.RefreshToken))
+            return (tokenResult.AccessToken, tokenResult.RefreshToken);
+        }
+
+        private static bool TryConsumeEscape()
+        {
+            try
             {
-                Host.UI.WriteLine($"Refresh token (save for future use): {tokenResult.RefreshToken}");
+                if (Console.IsInputRedirected) return false;
+                while (Console.KeyAvailable)
+                {
+                    var key = Console.ReadKey(intercept: true);
+                    if (key.Key == ConsoleKey.Escape) return true;
+                }
             }
+            catch
+            {
+                // KeyAvailable throws InvalidOperationException when input is redirected
+                // or no console is attached; treat as "no key".
+            }
+            return false;
+        }
 
-            return tokenResult.AccessToken;
+        private void WriteRegistrationHelp(int port)
+        {
+            var redirectUri = $"http://localhost:{port}/";
+            Host.UI.WriteLine("--- Dropbox app registration ---");
+            Host.UI.WriteLine($"App console:    {TerminalHyperlink.Format("https://www.dropbox.com/developers/apps")}");
+            Host.UI.WriteLine($"Create app:     {TerminalHyperlink.Format("https://www.dropbox.com/developers/apps/create")}");
+            Host.UI.WriteLine($"Redirect URI:   {redirectUri}   (add under Settings -> OAuth 2 -> Redirect URIs)");
+            Host.UI.WriteLine("Scopes:         files.metadata.read, files.metadata.write,");
+            Host.UI.WriteLine("                files.content.read,  files.content.write,");
+            Host.UI.WriteLine("                sharing.read,        sharing.write,");
+            Host.UI.WriteLine("                account_info.read    (Permissions tab; click Submit)");
+            Host.UI.WriteLine("--------------------------------");
         }
     }
 
@@ -158,6 +327,14 @@ namespace DbxProvider.Cmdlets
                     dbxDrive.Service.Dispose();
                 }
                 SessionState.Drive.Remove(DriveName, true, "global");
+                try
+                {
+                    SessionState.InvokeCommand.InvokeScript(
+                        false,
+                        ScriptBlock.Create($"if (Test-Path function:global:{DriveName}:) {{ Remove-Item function:global:{DriveName}: }}"),
+                        null);
+                }
+                catch { /* best effort */ }
                 Host.UI.WriteLine($"Disconnected from Dropbox drive '{DriveName}:'.");
             }
             catch (Exception ex)

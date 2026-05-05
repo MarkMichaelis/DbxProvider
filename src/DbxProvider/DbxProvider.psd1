@@ -14,6 +14,10 @@
         # Authentication
         'Connect-Dropbox',
         'Disconnect-Dropbox',
+        # Credentials
+        'Get-DropboxCredential',
+        'Set-DropboxCredential',
+        'Remove-DropboxCredential',
         # Search
         'Search-Dropbox',
         # Revisions
