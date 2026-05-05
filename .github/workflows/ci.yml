@@ -32,6 +32,13 @@ jobs:
           $largeFlag = '${{ inputs.include-large-file-tests }}' -eq 'true'
           $args = @{ Configuration = 'Release' }
           if ($largeFlag) { $args.IncludeLargeFileTests = $true }
+          # When the repo's Dropbox secrets are unset (e.g. forks, first-time
+          # setup), let the build proceed and run only the secret-leak guard
+          # rather than failing the whole job.
+          if (-not $env:DBX_APP_KEY -or -not $env:DBX_REFRESH_TOKEN) {
+            Write-Host "::warning::Dropbox secrets not configured; running with -AllowMissingSecrets (integration tests will be skipped)."
+            $args.AllowMissingSecrets = $true
+          }
           ./build/Build-And-Test.ps1 @args
       - name: Upload test results
         if: always()
