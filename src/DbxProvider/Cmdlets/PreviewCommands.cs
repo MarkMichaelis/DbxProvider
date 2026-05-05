@@ -22,7 +22,7 @@ namespace DbxProvider.Cmdlets
             try
             {
                 var service = GetService();
-                var (content, contentType) = service.GetPreviewAsync(Path).GetAwaiter().GetResult();
+                var (content, contentType) = Run(ct => service.GetPreviewAsync(Path, cancellationToken: ct));
 
                 if (!string.IsNullOrEmpty(OutFile))
                 {
@@ -70,7 +70,7 @@ namespace DbxProvider.Cmdlets
             try
             {
                 var service = GetService();
-                var content = service.GetThumbnailAsync(Path, Size, Format).GetAwaiter().GetResult();
+                var content = Run(ct => service.GetThumbnailAsync(Path, Size, Format, cancellationToken: ct));
 
                 if (!string.IsNullOrEmpty(OutFile))
                 {

@@ -38,7 +38,7 @@ namespace DbxProvider.Cmdlets
                 }
 
                 var service = GetService();
-                var bytes = service.DownloadBytesAsync(Path).GetAwaiter().GetResult();
+                var bytes = Run(ct => service.DownloadBytesAsync(Path, cancellationToken: ct));
 
                 // Ensure destination directory exists
                 var dir = System.IO.Path.GetDirectoryName(resolvedDest);
@@ -100,7 +100,7 @@ namespace DbxProvider.Cmdlets
 
                 var service = GetService();
                 using var stream = File.OpenRead(resolvedSource);
-                var item = service.UploadAsync(DropboxPath, stream, mode).GetAwaiter().GetResult();
+                var item = Run(ct => service.UploadAsync(DropboxPath, stream, mode, cancellationToken: ct));
                 WriteObject(item);
 
                 WriteVerbose($"Uploaded {resolvedSource} to {item.Path} ({item.Size:N0} bytes)");

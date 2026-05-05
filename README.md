@@ -358,6 +358,43 @@ Get-ChildItem Dbx:\Documents\*.docx | Get-DropboxRevision
 Get-ChildItem Dbx:\ProjectX | ForEach-Object { Add-DropboxTag -Path $_.Path -Tag "projectx" }
 ```
 
+## Rate limiting and cancellation
+
+Dropbox throttles aggressive callers and responds with HTTP 429 plus a
+`Retry-After` value. DbxProvider handles this transparently:
+
+- Every Dropbox call is wrapped by a retry helper. On a 429 response the
+  module emits a `Write-Warning` (matching `Invoke-WebRequest`'s style),
+  waits for the server-supplied `Retry-After` interval, then retries.
+- Retries are unbounded — the call eventually succeeds or you cancel.
+- `Ctrl+C` is honored at any time, including while waiting out a
+  rate-limit. Cancellation surfaces as a normal pipeline-stopped error.
+
+Verbose details (attempt number, cumulative wait time) are emitted via
+`Write-Verbose`. Run with `-Verbose` to see them:
+
+```powershell
+Get-ChildItem Dbx:\ -Verbose
+```
+
+### Demoing rate-limit retry locally
+
+To exercise the retry path without actually hammering Dropbox, set
+`DBX_SIMULATE_RATELIMIT` before invoking any cmdlet. The format is
+`count[:seconds]` — the next *count* Dropbox calls (process-wide) throw
+a synthetic rate-limit response with `Retry-After = seconds` (default
+2):
+
+```powershell
+$env:DBX_SIMULATE_RATELIMIT = '3:5'   # next 3 calls fake-throttle, 5s each
+Get-ChildItem Dbx:\ -Verbose          # press Ctrl+C any time during waits
+Remove-Item Env:\DBX_SIMULATE_RATELIMIT
+```
+
+You'll see three `WARNING: Dropbox returned 429 (rate limit). Waiting
+5s before retry. Press Ctrl+C to cancel.` lines before the call
+succeeds.
+
 ## Testing
 
 DbxProvider ships with two test suites that run against the **real** Dropbox

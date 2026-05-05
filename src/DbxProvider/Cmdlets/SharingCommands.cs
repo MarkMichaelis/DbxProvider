@@ -17,7 +17,7 @@ namespace DbxProvider.Cmdlets
             try
             {
                 var service = GetService();
-                var result = service.ShareFolderAsync(Path).GetAwaiter().GetResult();
+                var result = Run(ct => service.ShareFolderAsync(Path, cancellationToken: ct));
                 WriteObject(result);
                 WriteVerbose($"Shared folder {Path}, ID: {result}");
             }
@@ -46,7 +46,7 @@ namespace DbxProvider.Cmdlets
                 if (ShouldProcess(SharedFolderId, "Unshare folder"))
                 {
                     var service = GetService();
-                    service.UnshareFolderAsync(SharedFolderId, LeaveACopy).GetAwaiter().GetResult();
+                    Run(ct => service.UnshareFolderAsync(SharedFolderId, LeaveACopy, cancellationToken: ct));
                     WriteVerbose($"Unshared folder {SharedFolderId}");
                 }
             }
@@ -80,7 +80,7 @@ namespace DbxProvider.Cmdlets
                 }
                 else
                 {
-                    var folders = service.ListSharedFoldersAsync().GetAwaiter().GetResult();
+                    var folders = Run(ct => service.ListSharedFoldersAsync(cancellationToken: ct));
                     foreach (var folder in folders)
                     {
                         WriteObject(folder);

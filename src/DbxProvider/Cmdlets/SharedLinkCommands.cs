@@ -59,12 +59,12 @@ namespace DbxProvider.Cmdlets
 
                 if (!string.IsNullOrEmpty(Url))
                 {
-                    var link = service.GetSharedLinkMetadataAsync(Url).GetAwaiter().GetResult();
+                    var link = Run(ct => service.GetSharedLinkMetadataAsync(Url, cancellationToken: ct));
                     WriteObject(link);
                 }
                 else
                 {
-                    var links = service.ListSharedLinksAsync(Path).GetAwaiter().GetResult();
+                    var links = Run(ct => service.ListSharedLinksAsync(Path, cancellationToken: ct));
                     foreach (var link in links)
                     {
                         WriteObject(link);
@@ -94,7 +94,7 @@ namespace DbxProvider.Cmdlets
                 if (ShouldProcess(Url, "Revoke shared link"))
                 {
                     var service = GetService();
-                    service.RevokeSharedLinkAsync(Url).GetAwaiter().GetResult();
+                    Run(ct => service.RevokeSharedLinkAsync(Url, cancellationToken: ct));
                     WriteVerbose($"Revoked shared link: {Url}");
                 }
             }

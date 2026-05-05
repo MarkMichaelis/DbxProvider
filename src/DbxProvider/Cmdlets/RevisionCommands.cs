@@ -22,7 +22,7 @@ namespace DbxProvider.Cmdlets
             try
             {
                 var service = GetService();
-                var revisions = service.ListRevisionsAsync(Path, Limit).GetAwaiter().GetResult();
+                var revisions = Run(ct => service.ListRevisionsAsync(Path, Limit, cancellationToken: ct));
                 foreach (var rev in revisions)
                 {
                     WriteObject(rev);
@@ -54,7 +54,7 @@ namespace DbxProvider.Cmdlets
                 if (ShouldProcess($"{Path} to revision {Rev}", "Restore"))
                 {
                     var service = GetService();
-                    var item = service.RestoreAsync(Path, Rev).GetAwaiter().GetResult();
+                    var item = Run(ct => service.RestoreAsync(Path, Rev, cancellationToken: ct));
                     WriteObject(item);
                 }
             }

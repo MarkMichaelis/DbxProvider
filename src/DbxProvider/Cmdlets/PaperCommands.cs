@@ -25,7 +25,7 @@ namespace DbxProvider.Cmdlets
             {
                 var service = GetService();
                 var bytes = Encoding.UTF8.GetBytes(Content);
-                var url = service.CreatePaperDocAsync(Path, bytes, ImportFormat).GetAwaiter().GetResult();
+                var url = Run(ct => service.CreatePaperDocAsync(Path, bytes, ImportFormat, cancellationToken: ct));
                 WriteObject(url);
                 WriteVerbose($"Created Paper doc at {Path}: {url}");
             }

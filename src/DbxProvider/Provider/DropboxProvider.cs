@@ -1,9 +1,12 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Management.Automation;
 using System.Management.Automation.Provider;
+using System.Threading;
+using System.Threading.Tasks;
 using DbxProvider.Models;
 using DbxProvider.Services;
 
@@ -48,7 +51,7 @@ namespace DbxProvider.Provider
                     driveInfo = new DropboxDriveInfo(drive, dynParams.AccessToken);
                 }
 
-                driveInfo.Service.GetCurrentAccountAsync().GetAwaiter().GetResult();
+                Run(ct => driveInfo.Service.GetCurrentAccountAsync(cancellationToken: ct));
                 return driveInfo;
             }
             catch (Exception ex)
@@ -72,6 +75,85 @@ namespace DbxProvider.Provider
                 dbxDrive.Service.Dispose();
             }
             return drive;
+        }
+
+        #endregion
+
+        #region Cancellation / rate-limit run helper
+
+        private readonly ConcurrentQueue<Action> _pendingWrites = new();
+
+        /// <summary>
+        /// Runs an async Dropbox call from the synchronous provider context.
+        /// Polls <see cref="CmdletProvider.Stopping"/> to honor Ctrl+C (the
+        /// underlying HTTP call is left to drain) and pumps queued
+        /// <c>WriteWarning</c>/<c>WriteVerbose</c> messages emitted by the
+        /// rate-limit notifier on the pipeline thread.
+        /// </summary>
+        private T Run<T>(Func<CancellationToken, Task<T>> op)
+        {
+            using var cts = new CancellationTokenSource();
+            WireRateLimitNotifier();
+            var task = op(cts.Token);
+            PumpUntil(task, cts);
+            try { return task.GetAwaiter().GetResult(); }
+            catch (OperationCanceledException) { throw new PipelineStoppedException(); }
+        }
+
+        private void Run(Func<CancellationToken, Task> op)
+        {
+            using var cts = new CancellationTokenSource();
+            WireRateLimitNotifier();
+            var task = op(cts.Token);
+            PumpUntil(task, cts);
+            try { task.GetAwaiter().GetResult(); }
+            catch (OperationCanceledException) { throw new PipelineStoppedException(); }
+        }
+
+        private void WireRateLimitNotifier()
+        {
+            if (PSDriveInfo is DropboxDriveInfo dbx)
+            {
+                dbx.Service.SetRateLimitNotifier(new ProviderRateLimitNotifier(this));
+            }
+        }
+
+        private void PumpUntil(Task task, CancellationTokenSource cts)
+        {
+            while (!task.IsCompleted)
+            {
+                if (Stopping)
+                {
+                    try { cts.Cancel(); } catch { }
+                }
+                while (_pendingWrites.TryDequeue(out var action))
+                {
+                    try { action(); } catch { /* best-effort UI write */ }
+                }
+                Thread.Sleep(50);
+            }
+            while (_pendingWrites.TryDequeue(out var action))
+            {
+                try { action(); } catch { }
+            }
+        }
+
+        internal void EnqueueWrite(Action action) => _pendingWrites.Enqueue(action);
+
+        private sealed class ProviderRateLimitNotifier : IRateLimitNotifier
+        {
+            private readonly DropboxProvider _provider;
+            public ProviderRateLimitNotifier(DropboxProvider provider) => _provider = provider;
+
+            public void OnRateLimited(int attempt, TimeSpan retryAfter, TimeSpan totalWaited)
+            {
+                int seconds = (int)Math.Ceiling(retryAfter.TotalSeconds);
+                int totalSeconds = (int)Math.Ceiling(totalWaited.TotalSeconds);
+                _provider.EnqueueWrite(() => _provider.WriteWarning(
+                    $"Dropbox returned 429 (rate limit). Waiting {seconds}s before retry. Press Ctrl+C to cancel."));
+                _provider.EnqueueWrite(() => _provider.WriteVerbose(
+                    $"Rate-limit retry: attempt #{attempt} failed; waiting {seconds}s; cumulative wait so far {totalSeconds}s."));
+            }
         }
 
         #endregion
@@ -166,7 +248,7 @@ namespace DbxProvider.Provider
                     }
                 }
 
-                return service.ItemExistsAsync(path).GetAwaiter().GetResult();
+                return Run(ct => service.ItemExistsAsync(path, cancellationToken: ct));
             }
             catch
             {
@@ -184,7 +266,7 @@ namespace DbxProvider.Provider
             try
             {
                 var service = GetService();
-                var item = service.GetMetadataAsync(path).GetAwaiter().GetResult();
+                var item = Run(ct => service.GetMetadataAsync(path, cancellationToken: ct));
                 WriteItemObject(item, item.Path, item.IsFolder);
             }
             catch (Exception ex)
@@ -202,7 +284,7 @@ namespace DbxProvider.Provider
             try
             {
                 var service = GetService();
-                var item = service.GetMetadataAsync(path).GetAwaiter().GetResult();
+                var item = Run(ct => service.GetMetadataAsync(path, cancellationToken: ct));
                 return item.IsFolder;
             }
             catch
@@ -260,7 +342,7 @@ namespace DbxProvider.Provider
                 var cache = GetCache();
                 var items = cache != null
                     ? cache.GetChildren(path)
-                    : service.ListFolderAsync(path).GetAwaiter().GetResult();
+                    : Run(ct => service.ListFolderAsync(path, cancellationToken: ct));
                 return items.Count > 0;
             }
             catch
@@ -311,7 +393,7 @@ namespace DbxProvider.Provider
                 var cache = GetCache();
                 var items = (cache != null && !recurse)
                     ? cache.GetChildren(path)
-                    : service.ListFolderAsync(path, recursive: recurse).GetAwaiter().GetResult();
+                    : Run(ct => service.ListFolderAsync(path, recursive: recurse, cancellationToken: ct));
                 foreach (var item in items.OrderBy(i => !i.IsFolder).ThenBy(i => i.Name))
                 {
                     var providerPath = item.Path.Replace('/', '\\').TrimStart('\\');
@@ -338,7 +420,7 @@ namespace DbxProvider.Provider
                 var cache = GetCache();
                 var items = cache != null
                     ? cache.GetChildren(path)
-                    : service.ListFolderAsync(path).GetAwaiter().GetResult();
+                    : Run(ct => service.ListFolderAsync(path, cancellationToken: ct));
                 foreach (var item in items.OrderBy(i => !i.IsFolder).ThenBy(i => i.Name))
                 {
                     WriteItemObject(item.Name, item.Path.Replace('/', '\\').TrimStart('\\'), item.IsFolder);
@@ -366,7 +448,7 @@ namespace DbxProvider.Provider
                 {
                     if (ShouldProcess(path, "Create folder"))
                     {
-                        var item = service.CreateFolderAsync(path).GetAwaiter().GetResult();
+                        var item = Run(ct => service.CreateFolderAsync(path, cancellationToken: ct));
                         GetCache()?.ApplyLocalAdd(item);
                         WriteItemObject(item, item.Path.Replace('/', '\\').TrimStart('\\'), true);
                     }
@@ -377,7 +459,7 @@ namespace DbxProvider.Provider
                     {
                         var content = newItemValue?.ToString() ?? "";
                         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
-                        var item = service.UploadAsync(path, stream).GetAwaiter().GetResult();
+                        var item = Run(ct => service.UploadAsync(path, stream, cancellationToken: ct));
                         GetCache()?.ApplyLocalAdd(item);
                         WriteItemObject(item, item.Path.Replace('/', '\\').TrimStart('\\'), false);
                     }
@@ -404,7 +486,7 @@ namespace DbxProvider.Provider
 
                 if (ShouldProcess(path, permanent ? "Permanently delete" : "Delete"))
                 {
-                    service.DeleteAsync(path, permanent).GetAwaiter().GetResult();
+                    Run(ct => service.DeleteAsync(path, permanent, cancellationToken: ct));
                     GetCache()?.ApplyLocalRemove(path);
                 }
             }
@@ -426,7 +508,7 @@ namespace DbxProvider.Provider
                 var service = GetService();
                 if (ShouldProcess($"{path} -> {copyPath}", "Copy"))
                 {
-                    var item = service.CopyAsync(path, copyPath).GetAwaiter().GetResult();
+                    var item = Run(ct => service.CopyAsync(path, copyPath, cancellationToken: ct));
                     GetCache()?.ApplyLocalAdd(item);
                     WriteItemObject(item, item.Path.Replace('/', '\\').TrimStart('\\'), item.IsFolder);
                 }
@@ -445,7 +527,7 @@ namespace DbxProvider.Provider
                 var service = GetService();
                 if (ShouldProcess($"{path} -> {destination}", "Move"))
                 {
-                    var item = service.MoveAsync(path, destination).GetAwaiter().GetResult();
+                    var item = Run(ct => service.MoveAsync(path, destination, cancellationToken: ct));
                     var cache = GetCache();
                     cache?.ApplyLocalRemove(path);
                     cache?.ApplyLocalAdd(item);
@@ -468,7 +550,7 @@ namespace DbxProvider.Provider
                 var newPath = MakePath(parentPath, newName);
                 if (ShouldProcess($"{path} -> {newPath}", "Rename"))
                 {
-                    var item = service.MoveAsync(path, newPath).GetAwaiter().GetResult();
+                    var item = Run(ct => service.MoveAsync(path, newPath, cancellationToken: ct));
                     var cache = GetCache();
                     cache?.ApplyLocalRemove(path);
                     cache?.ApplyLocalAdd(item);
@@ -526,7 +608,7 @@ namespace DbxProvider.Provider
                 if (ShouldProcess(path, "Clear content"))
                 {
                     using var empty = new MemoryStream();
-                    service.UploadAsync(path, empty).GetAwaiter().GetResult();
+                    Run(ct => service.UploadAsync(path, empty, cancellationToken: ct));
                 }
             }
             catch (Exception ex)
@@ -550,7 +632,7 @@ namespace DbxProvider.Provider
             try
             {
                 var service = GetService();
-                var item = service.GetMetadataAsync(path).GetAwaiter().GetResult();
+                var item = Run(ct => service.GetMetadataAsync(path, cancellationToken: ct));
                 var pso = new PSObject();
 
                 var properties = new (string Name, object? Value)[]

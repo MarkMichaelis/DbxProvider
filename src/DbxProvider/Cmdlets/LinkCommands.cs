@@ -18,7 +18,7 @@ namespace DbxProvider.Cmdlets
             try
             {
                 var service = GetService();
-                var link = service.GetTemporaryLinkAsync(Path).GetAwaiter().GetResult();
+                var link = Run(ct => service.GetTemporaryLinkAsync(Path, cancellationToken: ct));
                 WriteObject(link);
             }
             catch (Exception ex)
@@ -45,7 +45,7 @@ namespace DbxProvider.Cmdlets
             try
             {
                 var service = GetService();
-                var result = service.SaveUrlAsync(DropboxPath, Url).GetAwaiter().GetResult();
+                var result = Run(ct => service.SaveUrlAsync(DropboxPath, Url, cancellationToken: ct));
                 WriteObject(result);
                 WriteVerbose($"Save URL job: {result}");
             }
