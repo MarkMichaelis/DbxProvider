@@ -395,6 +395,15 @@ You'll see three `WARNING: Dropbox returned 429 (rate limit). Waiting
 5s before retry. Press Ctrl+C to cancel.` lines before the call
 succeeds.
 
+The simulator re-reads the environment variable every time it changes,
+so you can re-arm it mid-session without restarting PowerShell — set
+`$env:DBX_SIMULATE_RATELIMIT='3:5'` again (or change the value, e.g.
+`'3:5#a'`) to load a fresh count of fakes.
+
+`build\Demo-RateLimitRetry.ps1` wraps the whole flow (build, connect,
+arm, list, cleanup) and supports `-Mode Quick|Long|Real` for a
+guided walk-through.
+
 ## Testing
 
 DbxProvider ships with two test suites that run against the **real** Dropbox
