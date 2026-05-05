@@ -66,14 +66,14 @@ namespace DbxProvider.Services
     public sealed class EnvironmentRateLimitSimulator : IRateLimitSimulator
     {
         public const string EnvVarName = "DBX_SIMULATE_RATELIMIT";
-        private static int _remaining = -1;
+        private static int _remaining;
         private static int _retryAfterSeconds = 2;
+        private static string? _lastRaw;
         private static readonly object _initLock = new();
-        private static bool _initialized;
 
         public void ThrowIfShouldSimulate()
         {
-            EnsureInitialized();
+            ReloadIfChanged();
             if (_remaining <= 0) return;
 
             int next = Interlocked.Decrement(ref _remaining);
@@ -86,17 +86,30 @@ namespace DbxProvider.Services
             throw new SimulatedRateLimitException(_retryAfterSeconds);
         }
 
-        private static void EnsureInitialized()
+        /// <summary>
+        /// Re-reads <see cref="EnvVarName"/> whenever it changes so the
+        /// simulator can be (re-)armed mid-process. Setting the variable
+        /// to <c>"3:5"</c>, then to <c>"3:5b"</c> (anything different),
+        /// re-arms a fresh count of 3.
+        /// </summary>
+        private static void ReloadIfChanged()
         {
-            if (_initialized) return;
+            var raw = Environment.GetEnvironmentVariable(EnvVarName);
+            if (string.Equals(raw, _lastRaw, StringComparison.Ordinal)) return;
+
             lock (_initLock)
             {
-                if (_initialized) return;
-                _initialized = true;
-                var raw = Environment.GetEnvironmentVariable(EnvVarName);
+                if (string.Equals(raw, _lastRaw, StringComparison.Ordinal)) return;
+                _lastRaw = raw;
+                _remaining = 0;
+                _retryAfterSeconds = 2;
+
                 if (string.IsNullOrWhiteSpace(raw)) return;
 
-                var parts = raw.Split(':');
+                // Strip an optional trailing non-digit token used purely
+                // to force a re-arm (e.g. "3:5#a", "3:5b").
+                var armSpec = raw.Split('#', 2)[0];
+                var parts = armSpec.Split(':');
                 if (int.TryParse(parts[0], out var count) && count > 0)
                 {
                     _remaining = count;
@@ -111,7 +124,9 @@ namespace DbxProvider.Services
         {
             lock (_initLock)
             {
-                _initialized = true;
+                // Cache whatever the current env var is so the next
+                // ReloadIfChanged is a no-op and our injected counts stick.
+                _lastRaw = Environment.GetEnvironmentVariable(EnvVarName);
                 _remaining = remaining;
                 _retryAfterSeconds = retryAfterSeconds;
             }
