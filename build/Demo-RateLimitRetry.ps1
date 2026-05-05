@@ -33,12 +33,14 @@
     Hit real Dropbox at the given path (no fake 429s).
 #>
 param(
-    [ValidateSet('Quick','Long','Real')]
+    [ValidateSet('Quick','Long','Real','Hammer')]
     [string]$Mode = 'Quick',
 
     [string]$RemotePath = '/',
 
     [string]$DriveName = 'DbxDemo',
+
+    [int]$HammerCount = 500,
 
     [switch]$SkipBuild
 )
@@ -122,9 +124,48 @@ switch ($Mode) {
         Write-Host "Simulator disabled — hitting real Dropbox only." -ForegroundColor Yellow
         break
     }
+    'Hammer' {
+        Write-Host "Simulator disabled — will fire $HammerCount real Dropbox calls in a tight loop to attempt to trigger a real 429." -ForegroundColor Yellow
+        Write-Host "Press Ctrl+C any time to stop. WARNING: aggressive use can get your app temporarily throttled." -ForegroundColor Yellow
+        break
+    }
 }
 
 # 7. The actual demo call. -Verbose surfaces "attempt #N / cumulative wait" lines.
+if ($Mode -eq 'Hammer') {
+    Write-Section "Hammering $($DriveName):$RemotePath  ($HammerCount calls; Ctrl+C to stop)"
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $hits = 0
+    try {
+        for ($i = 1; $i -le $HammerCount; $i++) {
+            try {
+                # Use Get-DropboxAccount as a cheap, predictable endpoint.
+                Get-DropboxAccount -DriveName $DriveName -ErrorAction Stop | Out-Null
+            } catch {
+                Write-Host "[$i] Caught: $($_.Exception.GetType().FullName): $($_.Exception.Message)" -ForegroundColor Red
+                throw
+            }
+            if ($i % 25 -eq 0) {
+                Write-Host ("[{0}] {1}/{2} calls done ({3:N1}s elapsed)" -f `
+                    [DateTime]::Now.ToString('HH:mm:ss'), $i, $HammerCount, $sw.Elapsed.TotalSeconds)
+            }
+        }
+    }
+    catch {
+        Write-Host ''
+        Write-Host "Stopped: $($_.Exception.GetType().FullName): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+    finally {
+        $sw.Stop()
+        Write-Host ("Hammer finished. Elapsed: {0:N1}s. If you saw any 'Dropbox returned 429' WARNING above, the retry path fired against a real rate limit." -f $sw.Elapsed.TotalSeconds) -ForegroundColor Green
+        Write-Section "Cleanup"
+        Disconnect-Dropbox -DriveName $DriveName -ErrorAction SilentlyContinue | Out-Null
+        Remove-Item Env:\DBX_SIMULATE_RATELIMIT -ErrorAction SilentlyContinue
+        Write-Host "Done."
+    }
+    return
+}
+
 Write-Section "Listing $($DriveName):$RemotePath  (watch for WARNING + Ctrl+C)"
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 try {
