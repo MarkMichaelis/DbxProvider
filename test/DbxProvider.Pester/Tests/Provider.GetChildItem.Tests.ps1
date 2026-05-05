@@ -41,6 +41,9 @@ Describe 'Provider Get-ChildItem' -Skip:(-not $HasCredentials) {
     }
 
     It 'supports wildcard filtering' {
+        # Dropbox metadata propagation on CI can briefly report the
+        # just-created folder as missing during wildcard resolution.
+        for ($i = 0; $i -lt 5 -and -not (Test-Path -LiteralPath $Folder.ProviderPath); $i++) { Start-Sleep -Seconds 2 }
         $items = Get-ChildItem -Path "$($Folder.ProviderPath)\*.txt"
         $items.Name | Should -Contain 'file1.txt'
         $items.Name | Should -Not -Contain 'file2.log'
@@ -49,12 +52,14 @@ Describe 'Provider Get-ChildItem' -Skip:(-not $HasCredentials) {
     It 'supports -Recurse with -Filter (routes to search_v2)' {
         # Search index has propagation latency; allow brief settling.
         Start-Sleep -Seconds 5
+        for ($i = 0; $i -lt 5 -and -not (Test-Path -LiteralPath $Folder.ProviderPath); $i++) { Start-Sleep -Seconds 2 }
         $items = Get-ChildItem -LiteralPath $Folder.ProviderPath -Recurse -Filter '*.txt'
         # Either the search returned results, or the call succeeded without throwing.
         ($items | Measure-Object).Count | Should -BeGreaterOrEqual 0
     }
 
     It 'accepts -NoSearch dynamic parameter to bypass search_v2' {
+        for ($i = 0; $i -lt 5 -and -not (Test-Path -LiteralPath $Folder.ProviderPath); $i++) { Start-Sleep -Seconds 2 }
         { Get-ChildItem -LiteralPath $Folder.ProviderPath -Recurse -Filter '*.txt' -NoSearch } | Should -Not -Throw
     }
 }
