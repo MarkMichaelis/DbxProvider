@@ -18,6 +18,11 @@
         'Get-DropboxCredential',
         'Set-DropboxCredential',
         'Remove-DropboxCredential',
+        # Cache
+        'Get-DropboxCacheInfo',
+        'Clear-DropboxCache',
+        'Update-DropboxCache',
+        'Set-DropboxCacheOption',
         # Search
         'Search-Dropbox',
         # Revisions

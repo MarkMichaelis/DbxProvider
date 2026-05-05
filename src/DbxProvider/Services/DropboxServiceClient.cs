@@ -51,17 +51,85 @@ namespace DbxProvider.Services
 
         public async Task<List<DropboxItem>> ListFolderAsync(string path, bool recursive = false, bool includeDeleted = false)
         {
+            var (items, _) = await ListFolderWithCursorAsync(path, recursive, includeDeleted);
+            return items;
+        }
+
+        /// <summary>
+        /// Same as <see cref="ListFolderAsync"/> but also returns the final
+        /// cursor representing the snapshot. Used by the metadata cache to
+        /// validate freshness on subsequent reads via
+        /// <see cref="ListFolderContinueRawAsync"/>.
+        /// </summary>
+        public async Task<(List<DropboxItem> Items, string Cursor)> ListFolderWithCursorAsync(
+            string path, bool recursive = false, bool includeDeleted = false)
+        {
             var dbxPath = NormalizePath(path);
             var items = new List<DropboxItem>();
             var result = await _client.Files.ListFolderAsync(dbxPath, recursive, includeDeleted: includeDeleted,
                 includeHasExplicitSharedMembers: true, includeMountedFolders: true);
             items.AddRange(result.Entries.Select(MapMetadataToItem));
+            var cursor = result.Cursor;
             while (result.HasMore)
             {
                 result = await _client.Files.ListFolderContinueAsync(result.Cursor);
                 items.AddRange(result.Entries.Select(MapMetadataToItem));
+                cursor = result.Cursor;
             }
-            return items;
+            return (items, cursor);
+        }
+
+        /// <summary>
+        /// Result of a delta-fetch via /files/list_folder/continue.
+        /// </summary>
+        public sealed class ListFolderDelta
+        {
+            public List<DropboxItem> AddsOrUpdates { get; } = new();
+            /// <summary>Lowercased paths of removed entries (folders or files; type unknown).</summary>
+            public List<string> Removes { get; } = new();
+            public string NewCursor { get; set; } = string.Empty;
+            public bool HasMore { get; set; }
+            /// <summary>True when the cursor was rejected; caller must full-refresh.</summary>
+            public bool ResetRequired { get; set; }
+        }
+
+        /// <summary>
+        /// Calls /files/list_folder/continue once. Returns a delta of
+        /// adds+removes since the cursor. Detects cursor invalidation and
+        /// signals it via <see cref="ListFolderDelta.ResetRequired"/>.
+        /// </summary>
+        public async Task<ListFolderDelta> ListFolderContinueRawAsync(string cursor)
+        {
+            var delta = new ListFolderDelta();
+            try
+            {
+                var result = await _client.Files.ListFolderContinueAsync(cursor);
+                foreach (var entry in result.Entries)
+                {
+                    if (entry.IsDeleted)
+                    {
+                        var p = entry.PathLower ?? entry.PathDisplay ?? entry.Name;
+                        delta.Removes.Add(p.ToLowerInvariant());
+                    }
+                    else
+                    {
+                        delta.AddsOrUpdates.Add(MapMetadataToItem(entry));
+                    }
+                }
+                delta.NewCursor = result.Cursor;
+                delta.HasMore = result.HasMore;
+            }
+            catch (ApiException<ListFolderContinueError> ex) when (ex.ErrorResponse.IsReset)
+            {
+                delta.ResetRequired = true;
+            }
+            catch (BadInputException)
+            {
+                // Cursor was rejected as malformed/expired by the server. Treat
+                // as a reset so the cache can fall back to a full enumeration.
+                delta.ResetRequired = true;
+            }
+            return delta;
         }
 
         public async Task<DropboxItem> GetMetadataAsync(string path, bool includeDeleted = false)

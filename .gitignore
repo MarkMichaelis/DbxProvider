@@ -11,3 +11,4 @@ TestResults/
 *.trx
 *.coverage
 test/DbxProvider.Pester/TestResults/
+*.local.ps1

@@ -68,6 +68,7 @@ namespace DbxProvider.Provider
         {
             if (drive is DropboxDriveInfo dbxDrive)
             {
+                try { dbxDrive.Cache?.Dispose(); } catch { }
                 dbxDrive.Service.Dispose();
             }
             return drive;
@@ -84,6 +85,11 @@ namespace DbxProvider.Provider
 
             throw new InvalidOperationException(
                 "No Dropbox drive found. Use New-PSDrive or Connect-Dropbox first.");
+        }
+
+        private MetadataCache? GetCache()
+        {
+            return (PSDriveInfo as DropboxDriveInfo)?.Cache;
         }
 
         private static string ToDropboxPath(string providerPath)
@@ -251,7 +257,10 @@ namespace DbxProvider.Provider
             try
             {
                 var service = GetService();
-                var items = service.ListFolderAsync(path).GetAwaiter().GetResult();
+                var cache = GetCache();
+                var items = cache != null
+                    ? cache.GetChildren(path)
+                    : service.ListFolderAsync(path).GetAwaiter().GetResult();
                 return items.Count > 0;
             }
             catch
@@ -299,7 +308,10 @@ namespace DbxProvider.Provider
                 }
 
                 WriteVerbose($"Get-ChildItem: routing to list_folder (path='{path}', recurse={recurse})");
-                var items = service.ListFolderAsync(path, recursive: recurse).GetAwaiter().GetResult();
+                var cache = GetCache();
+                var items = (cache != null && !recurse)
+                    ? cache.GetChildren(path)
+                    : service.ListFolderAsync(path, recursive: recurse).GetAwaiter().GetResult();
                 foreach (var item in items.OrderBy(i => !i.IsFolder).ThenBy(i => i.Name))
                 {
                     var providerPath = item.Path.Replace('/', '\\').TrimStart('\\');
@@ -323,7 +335,10 @@ namespace DbxProvider.Provider
             try
             {
                 var service = GetService();
-                var items = service.ListFolderAsync(path).GetAwaiter().GetResult();
+                var cache = GetCache();
+                var items = cache != null
+                    ? cache.GetChildren(path)
+                    : service.ListFolderAsync(path).GetAwaiter().GetResult();
                 foreach (var item in items.OrderBy(i => !i.IsFolder).ThenBy(i => i.Name))
                 {
                     WriteItemObject(item.Name, item.Path.Replace('/', '\\').TrimStart('\\'), item.IsFolder);
@@ -352,6 +367,7 @@ namespace DbxProvider.Provider
                     if (ShouldProcess(path, "Create folder"))
                     {
                         var item = service.CreateFolderAsync(path).GetAwaiter().GetResult();
+                        GetCache()?.ApplyLocalAdd(item);
                         WriteItemObject(item, item.Path.Replace('/', '\\').TrimStart('\\'), true);
                     }
                 }
@@ -362,6 +378,7 @@ namespace DbxProvider.Provider
                         var content = newItemValue?.ToString() ?? "";
                         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
                         var item = service.UploadAsync(path, stream).GetAwaiter().GetResult();
+                        GetCache()?.ApplyLocalAdd(item);
                         WriteItemObject(item, item.Path.Replace('/', '\\').TrimStart('\\'), false);
                     }
                 }
@@ -388,6 +405,7 @@ namespace DbxProvider.Provider
                 if (ShouldProcess(path, permanent ? "Permanently delete" : "Delete"))
                 {
                     service.DeleteAsync(path, permanent).GetAwaiter().GetResult();
+                    GetCache()?.ApplyLocalRemove(path);
                 }
             }
             catch (Exception ex)
@@ -409,6 +427,7 @@ namespace DbxProvider.Provider
                 if (ShouldProcess($"{path} -> {copyPath}", "Copy"))
                 {
                     var item = service.CopyAsync(path, copyPath).GetAwaiter().GetResult();
+                    GetCache()?.ApplyLocalAdd(item);
                     WriteItemObject(item, item.Path.Replace('/', '\\').TrimStart('\\'), item.IsFolder);
                 }
             }
@@ -427,6 +446,9 @@ namespace DbxProvider.Provider
                 if (ShouldProcess($"{path} -> {destination}", "Move"))
                 {
                     var item = service.MoveAsync(path, destination).GetAwaiter().GetResult();
+                    var cache = GetCache();
+                    cache?.ApplyLocalRemove(path);
+                    cache?.ApplyLocalAdd(item);
                     WriteItemObject(item, item.Path.Replace('/', '\\').TrimStart('\\'), item.IsFolder);
                 }
             }
@@ -447,6 +469,9 @@ namespace DbxProvider.Provider
                 if (ShouldProcess($"{path} -> {newPath}", "Rename"))
                 {
                     var item = service.MoveAsync(path, newPath).GetAwaiter().GetResult();
+                    var cache = GetCache();
+                    cache?.ApplyLocalRemove(path);
+                    cache?.ApplyLocalAdd(item);
                     WriteItemObject(item, item.Path.Replace('/', '\\').TrimStart('\\'), item.IsFolder);
                 }
             }

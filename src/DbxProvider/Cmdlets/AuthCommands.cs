@@ -121,6 +121,7 @@ namespace DbxProvider.Cmdlets
                     "\\", $"Dropbox ({account.Email})", null);
 
                 var dbxDrive = new DropboxDriveInfo(driveInfo, service);
+                dbxDrive.InitializeCache(account.AccountId);
                 SessionState.Drive.New(dbxDrive, "global");
                 WriteObject(dbxDrive);
 
@@ -324,6 +325,7 @@ namespace DbxProvider.Cmdlets
                 var drive = SessionState.Drive.Get(DriveName);
                 if (drive is DropboxDriveInfo dbxDrive)
                 {
+                    try { dbxDrive.Cache?.Dispose(); } catch { }
                     dbxDrive.Service.Dispose();
                 }
                 SessionState.Drive.Remove(DriveName, true, "global");
