@@ -86,18 +86,15 @@ namespace DbxProvider.Cmdlets
 
     /// <summary>Eagerly run validate+merge for a path (or all paths).</summary>
     [Cmdlet(VerbsData.Update, "DropboxCache")]
-    public class UpdateDropboxCacheCommand : PSCmdlet
+    public class UpdateDropboxCacheCommand : DropboxCmdletBase
     {
         [Parameter(Position = 0)]
         public string? Path { get; set; }
 
-        [Parameter]
-        public string DriveName { get; set; } = "Dbx";
-
         protected override void ProcessRecord()
         {
             var cache = CacheCmdletHelpers.GetCache(this, DriveName);
-            cache.UpdateAsync(Path).GetAwaiter().GetResult();
+            Run(ct => cache.UpdateAsync(Path, cancellationToken: ct));
         }
     }
 

@@ -19,7 +19,7 @@ namespace DbxProvider.Cmdlets
             try
             {
                 var service = GetService();
-                var items = service.LockFilesAsync(Path).GetAwaiter().GetResult();
+                var items = Run(ct => service.LockFilesAsync(Path, cancellationToken: ct));
                 foreach (var item in items)
                 {
                     WriteObject(item);
@@ -48,7 +48,7 @@ namespace DbxProvider.Cmdlets
             try
             {
                 var service = GetService();
-                var items = service.UnlockFilesAsync(Path).GetAwaiter().GetResult();
+                var items = Run(ct => service.UnlockFilesAsync(Path, cancellationToken: ct));
                 foreach (var item in items)
                 {
                     WriteObject(item);
@@ -77,7 +77,7 @@ namespace DbxProvider.Cmdlets
             try
             {
                 var service = GetService();
-                var items = service.GetFileLocksAsync(Path).GetAwaiter().GetResult();
+                var items = Run(ct => service.GetFileLocksAsync(Path, cancellationToken: ct));
                 foreach (var item in items)
                 {
                     WriteObject(item);

@@ -20,12 +20,12 @@ namespace DbxProvider.Cmdlets
 
                 if (!string.IsNullOrEmpty(AccountId))
                 {
-                    var account = service.GetAccountAsync(AccountId).GetAwaiter().GetResult();
+                    var account = Run(ct => service.GetAccountAsync(AccountId, cancellationToken: ct));
                     WriteObject(account);
                 }
                 else
                 {
-                    var account = service.GetCurrentAccountAsync().GetAwaiter().GetResult();
+                    var account = Run(ct => service.GetCurrentAccountAsync(cancellationToken: ct));
                     WriteObject(account);
                 }
             }
@@ -47,7 +47,7 @@ namespace DbxProvider.Cmdlets
             try
             {
                 var service = GetService();
-                var usage = service.GetSpaceUsageAsync().GetAwaiter().GetResult();
+                var usage = Run(ct => service.GetSpaceUsageAsync(cancellationToken: ct));
                 WriteObject(usage);
             }
             catch (Exception ex)

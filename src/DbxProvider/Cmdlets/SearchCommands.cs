@@ -2,29 +2,11 @@ using System;
 using System.Linq;
 using System.Management.Automation;
 using DbxProvider.Models;
-using DbxProvider.Provider;
 using DbxProvider.Services;
 using Dropbox.Api.Files;
 
 namespace DbxProvider.Cmdlets
 {
-    /// <summary>Base class for cmdlets that need a Dropbox service client.</summary>
-    public abstract class DropboxCmdletBase : PSCmdlet
-    {
-        [Parameter]
-        public string DriveName { get; set; } = "Dbx";
-
-        protected DropboxServiceClient GetService()
-        {
-            var drive = SessionState.Drive.Get(DriveName);
-            if (drive is DropboxDriveInfo dbxDrive)
-                return dbxDrive.Service;
-
-            throw new InvalidOperationException(
-                $"Drive '{DriveName}:' is not a Dropbox drive. Use Connect-Dropbox first.");
-        }
-    }
-
     /// <summary>
     /// Searches for files and folders in Dropbox using the indexed search_v2 API.
     /// Note: Dropbox search is prefix-token-based, not glob — '*' and '?' in
@@ -107,7 +89,7 @@ namespace DbxProvider.Cmdlets
                     .Select(MapCategory)
                     .ToArray();
 
-                var results = service.SearchAsync(
+                var results = Run(ct => service.SearchAsync(
                     query: Query,
                     path: Path,
                     maxResults: MaxResults,
@@ -116,8 +98,7 @@ namespace DbxProvider.Cmdlets
                     fileExtensions: FileExtensions,
                     fileCategories: categories,
                     fileStatus: MapStatus(FileStatus),
-                    orderBy: MapOrderBy(OrderBy)
-                ).GetAwaiter().GetResult();
+                    orderBy: MapOrderBy(OrderBy), cancellationToken: ct));
 
                 foreach (var result in results)
                 {

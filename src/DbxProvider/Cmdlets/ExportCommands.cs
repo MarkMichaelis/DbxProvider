@@ -23,7 +23,7 @@ namespace DbxProvider.Cmdlets
             try
             {
                 var service = GetService();
-                var (content, metadata) = service.ExportFileAsync(Path).GetAwaiter().GetResult();
+                var (content, metadata) = Run(ct => service.ExportFileAsync(Path, cancellationToken: ct));
 
                 if (!string.IsNullOrEmpty(OutFile))
                 {
@@ -75,7 +75,7 @@ namespace DbxProvider.Cmdlets
                 }
 
                 var service = GetService();
-                var items = service.CopyBatchAsync(entries).GetAwaiter().GetResult();
+                var items = Run(ct => service.CopyBatchAsync(entries, cancellationToken: ct));
                 foreach (var item in items)
                 {
                     WriteObject(item);
@@ -119,7 +119,7 @@ namespace DbxProvider.Cmdlets
                 }
 
                 var service = GetService();
-                var items = service.MoveBatchAsync(entries).GetAwaiter().GetResult();
+                var items = Run(ct => service.MoveBatchAsync(entries, cancellationToken: ct));
                 foreach (var item in items)
                 {
                     WriteObject(item);
@@ -147,7 +147,7 @@ namespace DbxProvider.Cmdlets
                 if (ShouldProcess(string.Join(", ", Path), "Batch delete"))
                 {
                     var service = GetService();
-                    service.DeleteBatchAsync(Path).GetAwaiter().GetResult();
+                    Run(ct => service.DeleteBatchAsync(Path, cancellationToken: ct));
                     WriteVerbose($"Batch deleted {Path.Length} items");
                 }
             }

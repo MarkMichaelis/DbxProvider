@@ -21,7 +21,7 @@ namespace DbxProvider.Cmdlets
             try
             {
                 var service = GetService();
-                service.AddTagAsync(Path, Tag).GetAwaiter().GetResult();
+                Run(ct => service.AddTagAsync(Path, Tag, cancellationToken: ct));
                 WriteVerbose($"Added tag '{Tag}' to {Path}");
             }
             catch (Exception ex)
@@ -51,7 +51,7 @@ namespace DbxProvider.Cmdlets
                 if (ShouldProcess($"Tag '{Tag}' from {Path}", "Remove"))
                 {
                     var service = GetService();
-                    service.RemoveTagAsync(Path, Tag).GetAwaiter().GetResult();
+                    Run(ct => service.RemoveTagAsync(Path, Tag, cancellationToken: ct));
                     WriteVerbose($"Removed tag '{Tag}' from {Path}");
                 }
             }
@@ -78,7 +78,7 @@ namespace DbxProvider.Cmdlets
             try
             {
                 var service = GetService();
-                var tags = service.GetTagsAsync(Path).GetAwaiter().GetResult();
+                var tags = Run(ct => service.GetTagsAsync(Path, cancellationToken: ct));
                 foreach (var tag in tags)
                 {
                     WriteObject(tag);

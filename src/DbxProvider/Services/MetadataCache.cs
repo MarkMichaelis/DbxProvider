@@ -89,29 +89,29 @@ namespace DbxProvider.Services
         /// validating the cursor first. On cache miss, full-enumerates and
         /// stores the result. Always reflects the latest server state.
         /// </summary>
-        public List<DropboxItem> GetChildren(string path)
+        public List<DropboxItem> GetChildren(string path, CancellationToken cancellationToken = default)
         {
-            return GetChildrenAsync(path).GetAwaiter().GetResult();
+            return GetChildrenAsync(path, cancellationToken).GetAwaiter().GetResult();
         }
 
-        public async Task<List<DropboxItem>> GetChildrenAsync(string path)
+        public async Task<List<DropboxItem>> GetChildrenAsync(string path, CancellationToken cancellationToken = default)
         {
             if (!_options.Enabled)
             {
-                return await _service.ListFolderAsync(path);
+                return await _service.ListFolderAsync(path, cancellationToken: cancellationToken);
             }
 
             var key = MakeKey(path);
 
             if (_entries.TryGetValue(key, out var entry))
             {
-                await ValidateAsync(entry);
+                await ValidateAsync(entry, cancellationToken);
                 entry.LastUsedUtc = DateTime.UtcNow;
                 return entry.Items.ToList();
             }
 
             // Cold miss: full enumeration.
-            var (items, cursor) = await _service.ListFolderWithCursorAsync(path);
+            var (items, cursor) = await _service.ListFolderWithCursorAsync(path, cancellationToken: cancellationToken);
             entry = new Entry
             {
                 Path = path,
@@ -134,16 +134,16 @@ namespace DbxProvider.Services
         }
 
         /// <summary>Eagerly run validate-and-merge for a path (or all paths if null).</summary>
-        public async Task UpdateAsync(string? path = null)
+        public async Task UpdateAsync(string? path = null, CancellationToken cancellationToken = default)
         {
             if (path != null)
             {
                 if (_entries.TryGetValue(MakeKey(path), out var e))
-                    await ValidateAsync(e);
+                    await ValidateAsync(e, cancellationToken);
                 return;
             }
             foreach (var e in _entries.Values.ToList())
-                await ValidateAsync(e);
+                await ValidateAsync(e, cancellationToken);
         }
 
         /// <summary>Drop a path's entry (or all entries if null).</summary>
@@ -215,16 +215,17 @@ namespace DbxProvider.Services
 
         // ----- internals ------------------------------------------------------
 
-        private async Task ValidateAsync(Entry entry)
+        private async Task ValidateAsync(Entry entry, CancellationToken cancellationToken = default)
         {
             while (true)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (string.IsNullOrEmpty(entry.Cursor)) break;
 
-                var delta = await _service.ListFolderContinueRawAsync(entry.Cursor);
+                var delta = await _service.ListFolderContinueRawAsync(entry.Cursor, cancellationToken);
                 if (delta.ResetRequired)
                 {
-                    var (items, newCursor) = await _service.ListFolderWithCursorAsync(entry.Path);
+                    var (items, newCursor) = await _service.ListFolderWithCursorAsync(entry.Path, cancellationToken: cancellationToken);
                     entry.Items = items.ToList();
                     entry.Cursor = newCursor;
                     entry.LastValidatedUtc = DateTime.UtcNow;
