@@ -132,14 +132,14 @@ namespace DbxProvider.Cmdlets
             private readonly DropboxCmdletBase _cmdlet;
             public CmdletRateLimitNotifier(DropboxCmdletBase cmdlet) => _cmdlet = cmdlet;
 
-            public void OnRateLimited(int attempt, TimeSpan retryAfter, TimeSpan totalWaited)
+            public void OnRateLimited(int attempt, TimeSpan retryAfter, TimeSpan totalWaited, string reason)
             {
                 int seconds = (int)Math.Ceiling(retryAfter.TotalSeconds);
                 int totalSeconds = (int)Math.Ceiling(totalWaited.TotalSeconds);
                 _cmdlet.EnqueueWrite(() => _cmdlet.WriteWarning(
-                    $"Dropbox returned 429 (rate limit). Waiting {seconds}s before retry. Press Ctrl+C to cancel."));
+                    $"Dropbox returned a transient error ({reason}). Waiting {seconds}s before retry. Press Ctrl+C to cancel."));
                 _cmdlet.EnqueueWrite(() => _cmdlet.WriteVerbose(
-                    $"Rate-limit retry: attempt #{attempt} failed; waiting {seconds}s; cumulative wait so far {totalSeconds}s."));
+                    $"Transient retry: attempt #{attempt} failed ({reason}); waiting {seconds}s; cumulative wait so far {totalSeconds}s."));
             }
         }
     }

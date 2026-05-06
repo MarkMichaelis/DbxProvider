@@ -38,7 +38,7 @@ namespace DbxProvider.Services
         // --- Rate limiting / cancellation infrastructure ---
         private IRateLimitNotifier? _rateLimitNotifier;
         private IDelay _rateLimitDelay = SystemDelay.Instance;
-        private IRateLimitSimulator? _rateLimitSimulator = new EnvironmentRateLimitSimulator();
+        private IRateLimitSimulator? _rateLimitSimulator = CompositeRateLimitSimulator.Default;
 
         /// <summary>Inject a notifier so cmdlets can surface
         /// <c>WriteWarning</c>/<c>WriteVerbose</c> during rate-limit waits.</summary>

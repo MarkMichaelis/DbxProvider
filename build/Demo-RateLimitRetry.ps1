@@ -6,18 +6,23 @@
 .DESCRIPTION
     Builds the module (Release), imports it, connects to a real Dropbox
     drive using stored credentials (env vars or the FunctionalTests
-    user-secrets), and runs Get-ChildItem against the drive. The
-    DBX_SIMULATE_RATELIMIT environment variable injects synthetic 429s
-    so you can watch the warning, the wait, and the eventual success
-    without actually triggering Dropbox throttling.
+    user-secrets), and runs Get-ChildItem against the drive. Three
+    DBX_SIMULATE_* environment variables inject synthetic transient
+    failures so you can watch the warning, the wait, and the eventual
+    success without actually triggering Dropbox throttling.
 
-    Three scenarios:
+    Six scenarios:
 
-      -Mode Quick   3 fake rate-limit hits, 5 seconds each (default).
-      -Mode Long    1 fake rate-limit hit, 60 seconds — long enough to
-                    test Ctrl+C cancellation during the wait.
-      -Mode Real    No simulation. Hits real Dropbox; rate limiting
-                    only fires if the API decides to throttle you.
+      -Mode Quick         3 fake HTTP-429s, 5 seconds each (default).
+      -Mode Long          1 fake HTTP-429, 60 seconds — long enough to
+                          test Ctrl+C cancellation during the wait.
+      -Mode SoftThrottle  3 fake 'too_many_write_operations' soft throttles.
+                          Exponential backoff (1s, 2s, 4s).
+      -Mode ServerError   2 fake HTTP 503 transient errors. Exponential
+                          backoff (1s, 2s).
+      -Mode Real          No simulation. Hits real Dropbox.
+      -Mode Hammer        Fires many real Dropbox calls to attempt to
+                          trigger an actual rate limit.
 
 .EXAMPLE
     pwsh -File build\Demo-RateLimitRetry.ps1
@@ -33,7 +38,7 @@
     Hit real Dropbox at the given path (no fake 429s).
 #>
 param(
-    [ValidateSet('Quick','Long','Real','Hammer')]
+    [ValidateSet('Quick','Long','Real','Hammer','SoftThrottle','ServerError')]
     [string]$Mode = 'Quick',
 
     [string]$RemotePath = '/',
@@ -84,9 +89,11 @@ the FunctionalTests user-secrets):
 }
 Write-Host "Found AppKey: $($secrets.AppKey.Substring(0,4))*** (refresh token present)"
 
-# 3. Make sure simulator is OFF for the connect step.
+# 3. Make sure simulators are OFF for the connect step.
 Write-Section "Configuring simulator (off until after Connect)"
-Remove-Item Env:\DBX_SIMULATE_RATELIMIT -ErrorAction SilentlyContinue
+Remove-Item Env:\DBX_SIMULATE_RATELIMIT      -ErrorAction SilentlyContinue
+Remove-Item Env:\DBX_SIMULATE_SOFT_RATELIMIT -ErrorAction SilentlyContinue
+Remove-Item Env:\DBX_SIMULATE_SERVER_ERROR   -ErrorAction SilentlyContinue
 
 # 4. Import the module fresh.
 Write-Section "Importing module"
@@ -118,6 +125,18 @@ switch ($Mode) {
         $env:DBX_SIMULATE_RATELIMIT = '1:60'
         Write-Host "Will inject 1 fake 429, 60s wait." -ForegroundColor Yellow
         Write-Host "While the WARNING is showing, press Ctrl+C to test cancellation." -ForegroundColor Yellow
+        break
+    }
+    'SoftThrottle' {
+        $env:DBX_SIMULATE_SOFT_RATELIMIT = '3:too_many_write_operations'
+        Write-Host "Will inject 3 fake 'too_many_write_operations' soft throttles." -ForegroundColor Yellow
+        Write-Host "Backoff is exponential (1s, 2s, 4s) so the demo finishes in ~7s." -ForegroundColor Yellow
+        break
+    }
+    'ServerError' {
+        $env:DBX_SIMULATE_SERVER_ERROR = '2:503'
+        Write-Host "Will inject 2 fake HTTP 503 transient server errors." -ForegroundColor Yellow
+        Write-Host "Backoff is exponential (1s, 2s) so the demo finishes in ~3s." -ForegroundColor Yellow
         break
     }
     'Real' {
@@ -157,10 +176,12 @@ if ($Mode -eq 'Hammer') {
     }
     finally {
         $sw.Stop()
-        Write-Host ("Hammer finished. Elapsed: {0:N1}s. If you saw any 'Dropbox returned 429' WARNING above, the retry path fired against a real rate limit." -f $sw.Elapsed.TotalSeconds) -ForegroundColor Green
+        Write-Host ("Hammer finished. Elapsed: {0:N1}s. If you saw any 'Dropbox returned a transient error' WARNING above, the retry path fired against a real rate limit." -f $sw.Elapsed.TotalSeconds) -ForegroundColor Green
         Write-Section "Cleanup"
         Disconnect-Dropbox -DriveName $DriveName -ErrorAction SilentlyContinue | Out-Null
-        Remove-Item Env:\DBX_SIMULATE_RATELIMIT -ErrorAction SilentlyContinue
+        Remove-Item Env:\DBX_SIMULATE_RATELIMIT      -ErrorAction SilentlyContinue
+        Remove-Item Env:\DBX_SIMULATE_SOFT_RATELIMIT -ErrorAction SilentlyContinue
+        Remove-Item Env:\DBX_SIMULATE_SERVER_ERROR   -ErrorAction SilentlyContinue
         Write-Host "Done."
     }
     return
@@ -182,6 +203,8 @@ finally {
     Write-Host ("Elapsed: {0:N1}s" -f $sw.Elapsed.TotalSeconds) -ForegroundColor Green
     Write-Section "Cleanup"
     Disconnect-Dropbox -DriveName $DriveName -ErrorAction SilentlyContinue | Out-Null
-    Remove-Item Env:\DBX_SIMULATE_RATELIMIT -ErrorAction SilentlyContinue
+    Remove-Item Env:\DBX_SIMULATE_RATELIMIT      -ErrorAction SilentlyContinue
+    Remove-Item Env:\DBX_SIMULATE_SOFT_RATELIMIT -ErrorAction SilentlyContinue
+    Remove-Item Env:\DBX_SIMULATE_SERVER_ERROR   -ErrorAction SilentlyContinue
     Write-Host "Done."
 }

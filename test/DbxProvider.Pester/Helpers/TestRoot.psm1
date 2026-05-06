@@ -37,31 +37,16 @@ function Initialize-DbxTestRoot {
         }
     }
 
-    # Create the root with retries that tolerate transient rate limiting
-    # (too_many_write_operations) and conflicts (path/conflict/folder, which
-    # just means another concurrent test file already created it).
-    $attempt = 0
-    while ($true) {
-        try {
-            if (Test-Path -LiteralPath $providerRoot) { break }
+    # Rate-limit / soft-throttle retries are handled by the provider itself
+    # (see RateLimitRetry.cs). path/conflict/folder just means another
+    # concurrent test file already created the root; treat it as success.
+    try {
+        if (-not (Test-Path -LiteralPath $providerRoot)) {
             New-Item -Path $providerRoot -ItemType Directory -Force -ErrorAction Stop | Out-Null
-            break
         }
-        catch {
-            $msg = $_.Exception.Message
-            if ($msg -match 'path/conflict/folder|already_exists') {
-                # Folder is already there; that's fine.
-                break
-            }
-            if ($msg -match 'too_many_write_operations|too_many_requests|rate_limit' -and $attempt -lt 6) {
-                $attempt++
-                $delay = [Math]::Min(30, [Math]::Pow(2, $attempt))
-                Write-Warning "Rate-limited creating test root; sleeping ${delay}s (attempt $attempt/6)."
-                Start-Sleep -Seconds $delay
-                continue
-            }
-            throw
-        }
+    }
+    catch {
+        if ($_.Exception.Message -notmatch 'path/conflict/folder|already_exists') { throw }
     }
 
     $script:Initialized = $true
@@ -87,25 +72,14 @@ function New-DbxTestFolder {
     $apiPath = "$script:TestRoot/$safe-$guid"
     $providerPath = "${DriveName}:\DbxProviderTests\$safe-$guid"
 
-    # Retry on transient Dropbox rate limiting and benign create-conflicts.
-    $attempt = 0
-    while ($true) {
-        try {
-            New-Item -Path $providerPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
-            break
-        }
-        catch {
-            $msg = $_.Exception.Message
-            if ($msg -match 'path/conflict/folder|already_exists') { break }
-            if ($msg -match 'too_many_write_operations|too_many_requests|rate_limit' -and $attempt -lt 6) {
-                $attempt++
-                $delay = [Math]::Min(30, [Math]::Pow(2, $attempt))
-                Write-Warning "Rate-limited creating test folder; sleeping ${delay}s (attempt $attempt/6)."
-                Start-Sleep -Seconds $delay
-                continue
-            }
-            throw
-        }
+    # Rate-limit / soft-throttle retries are handled by the provider; only
+    # benign create-conflicts (another test created the same path) need
+    # special handling here.
+    try {
+        New-Item -Path $providerPath -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    }
+    catch {
+        if ($_.Exception.Message -notmatch 'path/conflict/folder|already_exists') { throw }
     }
 
     return [pscustomobject]@{
