@@ -31,25 +31,17 @@ public class CacheTests : IDisposable
         return new MetadataCache(_fixture.Service!, accountId, opts);
     }
 
-    /// <summary>Folder creation can hit Dropbox's per-namespace write rate limit when
-    /// many cache tests run back-to-back. Retry a few times before giving up.</summary>
+    /// <summary>Create a test folder. Rate-limit / soft-throttle retries are
+    /// handled by the provider's <c>RateLimitRetry</c> helper; the only thing
+    /// that still needs handling here is the brief replication delay before a
+    /// subsequent <c>list_folder</c> sees the new folder.</summary>
     private async Task<string> NewTestFolderWithRetryAsync(string testName)
     {
-        for (int attempt = 0; ; attempt++)
-        {
-            try
-            {
-                var path = await _fixture.NewTestFolderAsync(testName);
-                // Small consistency wait so a subsequent list_folder doesn't hit
-                // path/not_found while replication catches up.
-                await Task.Delay(300);
-                return path;
-            }
-            catch (Dropbox.Api.RateLimitException) when (attempt < 4)
-            {
-                await Task.Delay(TimeSpan.FromSeconds(1 + attempt));
-            }
-        }
+        var path = await _fixture.NewTestFolderAsync(testName);
+        // Small consistency wait so a subsequent list_folder doesn't hit
+        // path/not_found while replication catches up.
+        await Task.Delay(300);
+        return path;
     }
 
     /// <summary>list_folder can briefly return path/not_found right after a folder
@@ -67,17 +59,8 @@ public class CacheTests : IDisposable
         }
     }
 
-    private async Task CreateFolderWithRetryAsync(string path)
-    {
-        for (int attempt = 0; ; attempt++)
-        {
-            try { await _fixture.Service!.CreateFolderAsync(path); return; }
-            catch (Dropbox.Api.RateLimitException) when (attempt < 4)
-            {
-                await Task.Delay(TimeSpan.FromSeconds(1 + attempt));
-            }
-        }
-    }
+    private Task CreateFolderWithRetryAsync(string path) =>
+        _fixture.Service!.CreateFolderAsync(path);
 
     [SkippableFact]
     public async Task Cache_ColdMiss_PopulatesEntry()

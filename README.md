@@ -360,49 +360,83 @@ Get-ChildItem Dbx:\ProjectX | ForEach-Object { Add-DropboxTag -Path $_.Path -Tag
 
 ## Rate limiting and cancellation
 
-Dropbox throttles aggressive callers and responds with HTTP 429 plus a
-`Retry-After` value. DbxProvider handles this transparently:
+Dropbox throttles aggressive callers in several ways. DbxProvider
+classifies each transient response and retries it transparently while
+honoring `Ctrl+C`:
 
-- Every Dropbox call is wrapped by a retry helper. On a 429 response the
-  module emits a `Write-Warning` (matching `Invoke-WebRequest`'s style),
-  waits for the server-supplied `Retry-After` interval, then retries.
-- Retries are unbounded — the call eventually succeeds or you cancel.
-- `Ctrl+C` is honored at any time, including while waiting out a
-  rate-limit. Cancellation surfaces as a normal pipeline-stopped error.
+| Class                 | Detection                                                                              | Wait policy                          |
+|-----------------------|----------------------------------------------------------------------------------------|--------------------------------------|
+| **HTTP 429**          | `Dropbox.Api.RateLimitException` (gateway rate limit)                                  | server `Retry-After`, 5 s fallback   |
+| **Soft throttle**     | `ApiException<T>` with body tag `too_many_write_operations` / `too_many_files` / `too_many_requests` / `*_rate_limit` | exponential 1 → 30 s (capped)        |
+| **HTTP 5xx / 408**    | `Dropbox.Api.HttpException` with status 408 / 500 / 502 / 503 / 504                    | exponential 1 → 30 s (capped)        |
+| Anything else         | propagates immediately — including `HttpRequestException` and other socket-level errors (those are connectivity loss, not throttling, and are out of scope here) | n/a |
 
-Verbose details (attempt number, cumulative wait time) are emitted via
-`Write-Verbose`. Run with `-Verbose` to see them:
+Each retry emits a `Write-Warning` such as
+`Dropbox returned a transient error (HTTP 429 (gateway rate limit)).
+Waiting 5s before retry. Press Ctrl+C to cancel.` Verbose details
+(attempt number, cumulative wait, classified reason) are emitted via
+`Write-Verbose`:
 
 ```powershell
 Get-ChildItem Dbx:\ -Verbose
 ```
 
-### Demoing rate-limit retry locally
+`Ctrl+C` is honored at any time, including while waiting out a retry.
+Cancellation surfaces as a normal pipeline-stopped error.
 
-To exercise the retry path without actually hammering Dropbox, set
-`DBX_SIMULATE_RATELIMIT` before invoking any cmdlet. The format is
-`count[:seconds]` — the next *count* Dropbox calls (process-wide) throw
-a synthetic rate-limit response with `Retry-After = seconds` (default
-2):
+### CI guardrail — no operation can retry forever
+
+For interactive use the retry loop is unbounded (you have `Ctrl+C`).
+CI has no human in the loop, so retries are bounded by an
+**elapsed-wall-clock budget per call**. If the next wait would push
+cumulative retry time past the budget, the original Dropbox exception
+is re-thrown (wrapped as `RetryBudgetExhaustedException`) so the test
+fails with a clear cause rather than timing out.
+
+The budget is resolved in this precedence order:
+
+1. `DBX_RETRY_MAX_ELAPSED_SECONDS` env var (any integer ≥ 0; `0`
+   disables retry entirely, useful for tests).
+2. **Auto-detect CI**: if `CI=true` or `GITHUB_ACTIONS=true`, default
+   to **120 s**.
+3. Otherwise (interactive): unbounded.
+
+A second safety net (per-class attempt cap of 1000) only activates
+when the elapsed budget is unset, defending against pathological
+loops where every wait collapses to ≈ 0 s.
+
+### Demoing locally
+
+`DBX_SIMULATE_RATELIMIT`, `DBX_SIMULATE_SOFT_RATELIMIT`, and
+`DBX_SIMULATE_SERVER_ERROR` inject synthetic transient failures so
+you can exercise each arm of the retry helper without actually
+contacting Dropbox. Format is `count[:detail]`:
 
 ```powershell
-$env:DBX_SIMULATE_RATELIMIT = '3:5'   # next 3 calls fake-throttle, 5s each
-Get-ChildItem Dbx:\ -Verbose          # press Ctrl+C any time during waits
-Remove-Item Env:\DBX_SIMULATE_RATELIMIT
+$env:DBX_SIMULATE_RATELIMIT      = '3:5'                          # 3 fake HTTP-429s, 5s Retry-After each
+$env:DBX_SIMULATE_SOFT_RATELIMIT = '3:too_many_write_operations'  # 3 soft throttles
+$env:DBX_SIMULATE_SERVER_ERROR   = '2:503'                        # 2 fake HTTP-503s
+Get-ChildItem Dbx:\ -Verbose       # press Ctrl+C any time during waits
+Remove-Item Env:\DBX_SIMULATE_RATELIMIT, Env:\DBX_SIMULATE_SOFT_RATELIMIT, Env:\DBX_SIMULATE_SERVER_ERROR
 ```
 
-You'll see three `WARNING: Dropbox returned 429 (rate limit). Waiting
-5s before retry. Press Ctrl+C to cancel.` lines before the call
-succeeds.
-
-The simulator re-reads the environment variable every time it changes,
-so you can re-arm it mid-session without restarting PowerShell — set
-`$env:DBX_SIMULATE_RATELIMIT='3:5'` again (or change the value, e.g.
-`'3:5#a'`) to load a fresh count of fakes.
+Each simulator re-reads its environment variable every time the value
+changes, so you can re-arm mid-session without restarting PowerShell
+(append `#anything` to force a re-arm without changing the count).
 
 `build\Demo-RateLimitRetry.ps1` wraps the whole flow (build, connect,
-arm, list, cleanup) and supports `-Mode Quick|Long|Real` for a
-guided walk-through.
+arm, list, cleanup) and supports
+`-Mode Quick|Long|SoftThrottle|ServerError|Real|Hammer` for a guided
+walk-through.
+
+### Future work: connectivity-loss probe
+
+Connection timeouts, DNS failures, and TLS resets are a categorically
+different problem from throttling — the server isn't asking us to
+slow down, it's unreachable. They are intentionally **not** retried
+by the helper above; a follow-up PR will add an AIMD/hill-climbing
+connectivity probe with its own UX ("Lost connectivity to Dropbox;
+probing every Ns…") and cancellation semantics.
 
 ## Testing
 

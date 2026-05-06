@@ -145,14 +145,14 @@ namespace DbxProvider.Provider
             private readonly DropboxProvider _provider;
             public ProviderRateLimitNotifier(DropboxProvider provider) => _provider = provider;
 
-            public void OnRateLimited(int attempt, TimeSpan retryAfter, TimeSpan totalWaited)
+            public void OnRateLimited(int attempt, TimeSpan retryAfter, TimeSpan totalWaited, string reason)
             {
                 int seconds = (int)Math.Ceiling(retryAfter.TotalSeconds);
                 int totalSeconds = (int)Math.Ceiling(totalWaited.TotalSeconds);
                 _provider.EnqueueWrite(() => _provider.WriteWarning(
-                    $"Dropbox returned 429 (rate limit). Waiting {seconds}s before retry. Press Ctrl+C to cancel."));
+                    $"Dropbox returned a transient error ({reason}). Waiting {seconds}s before retry. Press Ctrl+C to cancel."));
                 _provider.EnqueueWrite(() => _provider.WriteVerbose(
-                    $"Rate-limit retry: attempt #{attempt} failed; waiting {seconds}s; cumulative wait so far {totalSeconds}s."));
+                    $"Transient retry: attempt #{attempt} failed ({reason}); waiting {seconds}s; cumulative wait so far {totalSeconds}s."));
             }
         }
 
