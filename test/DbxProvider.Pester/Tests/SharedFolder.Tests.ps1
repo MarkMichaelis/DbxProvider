@@ -40,7 +40,11 @@ Describe 'Dropbox Shared Folder cmdlets' -Skip:(-not $HasCredentials) {
         ($folders | Measure-Object).Count | Should -BeGreaterOrEqual 0
     }
 
-    It 'Remove-DropboxSharedFolder unshares the folder' -Skip:($null -eq $script:SharedFolderId) {
+    It 'Remove-DropboxSharedFolder unshares the folder' {
+        if ($null -eq $script:SharedFolderId) {
+            Set-ItResult -Skipped -Because 'Add-DropboxSharedFolder did not produce a SharedFolderId.'
+            return
+        }
         Remove-DropboxSharedFolder -SharedFolderId $script:SharedFolderId -DriveName 'DbxTest' -Confirm:$false
         $script:SharedFolderId = $null
     }

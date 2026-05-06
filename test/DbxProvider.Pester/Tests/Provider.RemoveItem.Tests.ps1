@@ -44,19 +44,10 @@ Describe 'Provider Remove-Item' -Skip:(-not $HasCredentials) {
         Test-Path -LiteralPath $sub | Should -BeFalse
     }
 
-    It 'removes a file with -Force (permanent delete)' {
+    It 'removes a file with -Force (skips confirmation)' {
         $file = "$($Folder.ProviderPath)\force-remove.txt"
-        New-Item -Path $file -ItemType File -Value 'permanent bye' -Force | Out-Null
-        try {
-            Remove-Item -LiteralPath $file -Force -ErrorAction Stop
-        }
-        catch {
-            if ($_.Exception.Message -match 'permanent_delete' -or $_.Exception.Message -match 'missing_scope') {
-                Set-ItResult -Skipped -Because "Dropbox app token is missing the files.permanent_delete scope."
-                return
-            }
-            throw
-        }
+        New-Item -Path $file -ItemType File -Value 'bye' -Force | Out-Null
+        Remove-Item -LiteralPath $file -Force -ErrorAction Stop
         Test-Path -LiteralPath $file | Should -BeFalse
     }
 }

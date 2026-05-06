@@ -1,5 +1,4 @@
 using DbxProvider.FunctionalTests.Infrastructure;
-using Dropbox.Api;
 using Xunit;
 
 namespace DbxProvider.FunctionalTests.Services;
@@ -10,34 +9,21 @@ public class FolderTests
     private readonly DropboxFixture _fixture;
     public FolderTests(DropboxFixture fixture) => _fixture = fixture;
 
-    [SkippableFact(Skip = "Tracked by #2: AuthException: missing_scope/ on permanent_delete; needs team-context auth or widened catch.")]
-    public async Task CreateFolder_Delete_PermanentlyDelete()
+    [SkippableFact]
+    public async Task CreateFolder_Delete()
     {
         TestSkip.IfUnavailable(_fixture);
         var svc = _fixture.Service!;
-        var root = await _fixture.NewTestFolderAsync(nameof(CreateFolder_Delete_PermanentlyDelete));
+        var root = await _fixture.NewTestFolderAsync(nameof(CreateFolder_Delete));
         try
         {
-            var sub1 = $"{root}/regular";
-            var sub2 = $"{root}/permanent";
+            var sub = $"{root}/regular";
 
-            var f1 = await svc.CreateFolderAsync(sub1);
-            Assert.True(f1.IsFolder);
-            var f2 = await svc.CreateFolderAsync(sub2);
-            Assert.True(f2.IsFolder);
+            var f = await svc.CreateFolderAsync(sub);
+            Assert.True(f.IsFolder);
 
-            await svc.DeleteAsync(sub1);
-            Assert.False(await svc.ItemExistsAsync(sub1));
-
-            try
-            {
-                await svc.DeleteAsync(sub2, permanent: true);
-                Assert.False(await svc.ItemExistsAsync(sub2));
-            }
-            catch (BadInputException ex)
-            {
-                TestSkip.OnMissingScope(ex);
-            }
+            await svc.DeleteAsync(sub);
+            Assert.False(await svc.ItemExistsAsync(sub));
         }
         finally
         {

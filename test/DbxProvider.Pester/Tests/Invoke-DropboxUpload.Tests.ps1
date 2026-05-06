@@ -33,7 +33,11 @@ Describe 'Invoke-DropboxUpload' -Skip:(-not $HasCredentials) {
         Test-Path -LiteralPath "$($Folder.ProviderPath)\small.txt" | Should -BeTrue
     }
 
-    It 'uploads a large (~160 MB) file via chunked session' -Skip:(-not $RunLarge) {
+    It 'uploads a large (~160 MB) file via chunked session' {
+        if (-not $RunLarge) {
+            Set-ItResult -Skipped -Because 'Set DBX_RUN_LARGE_FILE_TESTS=1 (env var or user-secret) to enable the 160 MB chunked-upload test.'
+            return
+        }
         $local = Join-Path $TestDrive 'large.bin'
         $fs = [System.IO.File]::OpenWrite($local)
         try {

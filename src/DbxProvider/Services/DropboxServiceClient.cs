@@ -285,16 +285,13 @@ namespace DbxProvider.Services
             return MapMetadataToItem(result.Metadata);
         }
 
-        public Task DeleteAsync(string path, bool permanent = false, CancellationToken cancellationToken = default) =>
-            RetryAsync(_ => DeleteCoreAsync(path, permanent), cancellationToken);
+        public Task DeleteAsync(string path, CancellationToken cancellationToken = default) =>
+            RetryAsync(_ => DeleteCoreAsync(path), cancellationToken);
 
-        private async Task DeleteCoreAsync(string path, bool permanent = false)
+        private async Task DeleteCoreAsync(string path)
 {
             var dbxPath = NormalizePath(path);
-            if (permanent)
-                await _client.Files.PermanentlyDeleteAsync(dbxPath);
-            else
-                await _client.Files.DeleteV2Async(dbxPath);
+            await _client.Files.DeleteV2Async(dbxPath);
         }
 
         public Task<DropboxItem> CreateFolderAsync(string path, CancellationToken cancellationToken = default) =>

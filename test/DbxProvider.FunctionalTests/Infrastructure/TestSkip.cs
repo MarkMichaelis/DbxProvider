@@ -18,8 +18,7 @@ public static class TestSkip
     public static void OnMissingScope(Exception ex)
     {
         var msg = ex.Message ?? string.Empty;
-        if (msg.Contains("missing_scope", StringComparison.OrdinalIgnoreCase) ||
-            msg.Contains("permanent_delete", StringComparison.OrdinalIgnoreCase))
+        if (msg.Contains("missing_scope", StringComparison.OrdinalIgnoreCase))
         {
             Skip.If(true,
                 "Dropbox app token is missing the required scope for this test. " +

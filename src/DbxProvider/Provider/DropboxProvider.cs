@@ -477,16 +477,10 @@ namespace DbxProvider.Provider
             try
             {
                 var service = GetService();
-                bool permanent = false;
 
-                if (Force)
+                if (ShouldProcess(path, "Delete"))
                 {
-                    permanent = true;
-                }
-
-                if (ShouldProcess(path, permanent ? "Permanently delete" : "Delete"))
-                {
-                    Run(ct => service.DeleteAsync(path, permanent, cancellationToken: ct));
+                    Run(ct => service.DeleteAsync(path, cancellationToken: ct));
                     GetCache()?.ApplyLocalRemove(path);
                 }
             }

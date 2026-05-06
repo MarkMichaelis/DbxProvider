@@ -92,7 +92,6 @@ mkdir "New Folder"             # New-Item -ItemType Directory
 copy file.txt backup.txt       # Copy-Item
 move old.txt new.txt           # Move-Item / Rename-Item
 del unwanted.txt               # Remove-Item
-del junk.txt -Force            # Permanently delete
 
 # Check existence
 Test-Path Documents\report.docx
@@ -109,7 +108,6 @@ Test-Path Documents\report.docx
 | `New-Item -Type Dir`  | create_folder_v2          | Create a folder              |
 | `New-Item`            | upload                    | Create a file with content   |
 | `Remove-Item`         | delete_v2                 | Delete file/folder           |
-| `Remove-Item -Force`  | permanently_delete        | Permanently delete           |
 | `Copy-Item`           | copy_v2                   | Copy file/folder             |
 | `Move-Item`           | move_v2                   | Move file/folder             |
 | `Rename-Item`         | move_v2                   | Rename file/folder           |
@@ -337,7 +335,7 @@ This module covers the complete Dropbox API v2:
 
 | API Namespace | Endpoints Covered |
 |---------------|-------------------|
-| **Files**     | list_folder, get_metadata, download, upload, upload_session/*, copy_v2, move_v2, delete_v2, permanently_delete, create_folder_v2, search_v2, list_revisions, restore, get_preview, get_thumbnail_v2, get_temporary_link, save_url, copy_batch_v2, move_batch_v2, delete_batch, export, paper/create, paper/update, tags/add, tags/remove, tags/get, lock_file_batch, unlock_file_batch, get_file_lock_batch |
+| **Files**     | list_folder, get_metadata, download, upload, upload_session/*, copy_v2, move_v2, delete_v2, create_folder_v2, search_v2, list_revisions, restore, get_preview, get_thumbnail_v2, get_temporary_link, save_url, copy_batch_v2, move_batch_v2, delete_batch, export, paper/create, paper/update, tags/add, tags/remove, tags/get, lock_file_batch, unlock_file_batch, get_file_lock_batch |
 | **Sharing**   | create_shared_link_with_settings, list_shared_links, revoke_shared_link, get_shared_link_metadata, share_folder, unshare_folder, list_folders, get_folder_metadata, add_folder_member, remove_folder_member, list_folder_members, add_file_member, remove_file_member_v2, list_file_members |
 | **Users**     | get_current_account, get_account, get_space_usage |
 

@@ -100,8 +100,6 @@ Describe 'Provider Metadata Cache' -Skip:(-not $HasCredentials) {
         New-Item -Path "$($Folder.ProviderPath)\$name" -ItemType File -Value 'doomed' | Out-Null
         Get-ChildItem -LiteralPath $Folder.ProviderPath | Out-Null  # warm
 
-        # Remove-Item without -Force routes through soft-delete (the test app
-        # lacks the files.permanent_delete scope).
         Remove-Item -LiteralPath "$($Folder.ProviderPath)\$name"
 
         $names = (Get-ChildItem -LiteralPath $Folder.ProviderPath).Name
