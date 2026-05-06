@@ -10,7 +10,7 @@ public class FolderTests
     private readonly DropboxFixture _fixture;
     public FolderTests(DropboxFixture fixture) => _fixture = fixture;
 
-    [SkippableFact]
+    [SkippableFact(Skip = "Tracked by #2: AuthException: missing_scope/ on permanent_delete; needs team-context auth or widened catch.")]
     public async Task CreateFolder_Delete_PermanentlyDelete()
     {
         TestSkip.IfUnavailable(_fixture);
