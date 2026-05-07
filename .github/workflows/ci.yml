@@ -4,11 +4,6 @@ on:
     branches: [main, master]
   pull_request:
   workflow_dispatch:
-    inputs:
-      include-large-file-tests:
-        description: Run >150MB upload tests
-        type: boolean
-        default: false
 permissions:
   contents: read
 jobs:
@@ -22,6 +17,7 @@ jobs:
       DBX_APP_SECRET: ${{ secrets.DBX_APP_SECRET }}
       DBX_REFRESH_TOKEN: ${{ secrets.DBX_REFRESH_TOKEN }}
       DBX_TEST_MEMBER_EMAIL: ${{ secrets.DBX_TEST_MEMBER_EMAIL }}
+      DBX_RUN_LARGE_FILE_TESTS: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -29,9 +25,9 @@ jobs:
           dotnet-version: '8.0.x'
       - name: Build and test
         run: |
-          $largeFlag = '${{ inputs.include-large-file-tests }}' -eq 'true'
-          $args = @{ Configuration = 'Release' }
-          if ($largeFlag) { $args.IncludeLargeFileTests = $true }
+          # Always run the >150 MB chunked-upload tests in CI so that
+          # code path doesn't silently rot.
+          $args = @{ Configuration = 'Release'; IncludeLargeFileTests = $true }
           # When the repo's Dropbox secrets are unset (e.g. forks, first-time
           # setup), let the build proceed and run only the secret-leak guard
           # rather than failing the whole job.

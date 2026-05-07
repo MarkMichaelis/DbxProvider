@@ -22,7 +22,6 @@ namespace DbxProvider.Models
         public string MediaInfoTag { get; set; } = string.Empty;
         public string SymlinkTarget { get; set; } = string.Empty;
         public bool IsDownloadable { get; set; } = true;
-        public FileLockInfo? LockInfo { get; set; }
 
         public string ItemType => IsFolder ? "Folder" : "File";
         public string DisplaySize => IsFolder ? "" : FormatSize(Size);
@@ -37,13 +36,6 @@ namespace DbxProvider.Models
         }
 
         public override string ToString() => $"{(IsFolder ? "[D]" : "[F]")} {Name}";
-    }
-
-    public class FileLockInfo
-    {
-        public bool IsLockedByMe { get; set; }
-        public string LockedBy { get; set; } = string.Empty;
-        public DateTime? Created { get; set; }
     }
 
     public class DropboxRevision

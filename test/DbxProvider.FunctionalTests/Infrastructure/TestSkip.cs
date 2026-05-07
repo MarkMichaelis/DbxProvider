@@ -30,17 +30,6 @@ public static class TestSkip
     }
 
     /// <summary>
-    /// Skip on Dropbox AccessException (e.g. file_locks unavailable on this account
-    /// tier) with a clear reason; rethrow other types.
-    /// </summary>
-    public static void OnAccessException(AccessException ex)
-    {
-        Skip.If(true,
-            "Feature unavailable on this Dropbox account (account tier or scope). " +
-            $"(Original error: {ex.Message})");
-    }
-
-    /// <summary>
     /// Skip on transient/unexpected Dropbox RetryException (e.g. save_url returning
     /// 'unexpected error occurred' for a particular source URL).
     /// </summary>

@@ -5,7 +5,7 @@
     Author = 'DbxProvider Contributors'
     CompanyName = 'Community'
     Copyright = '(c) 2026 DbxProvider Contributors. All rights reserved.'
-    Description = 'PowerShell provider and cmdlets for Dropbox API. Navigate your Dropbox as a drive, manage files, sharing, tags, locks, revisions, and more.'
+    Description = 'PowerShell provider and cmdlets for Dropbox API. Navigate your Dropbox as a drive, manage files, sharing, tags, revisions, and more.'
     PowerShellVersion = '7.4'
     DotNetFrameworkVersion = '8.0'
     FormatsToProcess = @('DbxProvider.Format.ps1xml')
@@ -46,10 +46,6 @@
         'Add-DropboxTag',
         'Remove-DropboxTag',
         'Get-DropboxTag',
-        # Locks
-        'Lock-DropboxFile',
-        'Unlock-DropboxFile',
-        'Get-DropboxFileLock',
         # Account
         'Get-DropboxAccount',
         'Get-DropboxSpaceUsage',

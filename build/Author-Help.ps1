@@ -509,57 +509,6 @@ or pipeline input so you can query many items in a single API call.
     }
 }
 
-'Lock-DropboxFile' = @{
-    Synopsis = 'Locks one or more Dropbox files to prevent concurrent edits.'
-    Description = @"
-Acquires a Dropbox file lock on each path. While locked, other users
-cannot modify the file via the API or web UI. Returns the updated
-``DropboxItem`` for each path.
-"@
-    Examples = @(
-        @{ Code = 'Lock-DropboxFile -Path /report.docx'
-           Desc = 'Locks a single file.' }
-        @{ Code = '"/a.txt","/b.txt" | Lock-DropboxFile'
-           Desc = 'Locks multiple files via pipeline.' }
-    )
-    Parameters = @{
-        Path = 'One or more Dropbox file paths to lock.'
-    }
-}
-
-'Unlock-DropboxFile' = @{
-    Synopsis = 'Releases locks on one or more Dropbox files.'
-    Description = @"
-Releases a previously-acquired file lock on each path. Returns the
-updated ``DropboxItem`` for each.
-"@
-    Examples = @(
-        @{ Code = 'Unlock-DropboxFile -Path /report.docx'
-           Desc = 'Unlocks a single file.' }
-        @{ Code = 'Get-DropboxFileLock -Path /a.txt,/b.txt | Unlock-DropboxFile -Path { $_.Path }'
-           Desc = 'Unlocks every file currently shown as locked.' }
-    )
-    Parameters = @{
-        Path = 'One or more Dropbox file paths to unlock.'
-    }
-}
-
-'Get-DropboxFileLock' = @{
-    Synopsis = 'Returns lock status for one or more Dropbox files.'
-    Description = @"
-Reports whether each file is currently locked, by whom, and when.
-"@
-    Examples = @(
-        @{ Code = 'Get-DropboxFileLock -Path /report.docx'
-           Desc = 'Shows lock state for one file.' }
-        @{ Code = 'Get-DropboxFileLock -Path /a.txt,/b.txt | Format-Table Path, IsLocked, LockHolder'
-           Desc = 'Tabular view across multiple files.' }
-    )
-    Parameters = @{
-        Path = 'One or more Dropbox file paths to query.'
-    }
-}
-
 'Get-DropboxAccount' = @{
     Synopsis = 'Returns the current Dropbox account, or another account by ID.'
     Description = @"
@@ -897,7 +846,7 @@ DbxProvider exposes the full Dropbox API as a PowerShell **provider**
 (so you can ``cd Dbx:\`` and use ``Get-ChildItem``, ``Copy-Item``,
 ``Set-Content``, etc. against your Dropbox) plus a set of cmdlets for
 operations that don't fit a file-system metaphor (sharing, tags,
-locks, revisions, batched copy/move/delete, Paper, previews, and
+revisions, batched copy/move/delete, Paper, previews, and
 account info).
 
 Start with ``Connect-Dropbox`` to authenticate; thereafter the rest of

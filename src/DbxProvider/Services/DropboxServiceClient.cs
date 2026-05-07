@@ -423,13 +423,19 @@ namespace DbxProvider.Services
                 return listed.Where(i => wildcard.IsMatch(i.Name)).Take(maxResults).ToList();
             }
 
-            // Some queries (e.g. just an extension token) are too generic for
-            // search_v2. Dropbox requires a non-empty query, so when we only
-            // have an extension filter we still must pass something. Use the
-            // extension as the token in that case.
-            if (string.IsNullOrEmpty(query))
+            // Extension-only patterns (e.g. "*.txt", "*.pdf") have no useful
+            // search token — the only "token" we'd derive equals the extension,
+            // and Dropbox's search_v2 is unreliable for such short, common
+            // tokens (often returning zero hits even when matching files
+            // exist). Fall back to a recursive listing filtered client-side,
+            // which is authoritative for filename matching.
+            if (extension != null
+                && (tokens.Length == 0
+                    || (tokens.Length == 1
+                        && string.Equals(tokens[0], extension, StringComparison.OrdinalIgnoreCase))))
             {
-                query = extension!;
+                var listed = await ListFolderAsync(path, recursive: true);
+                return listed.Where(i => wildcard.IsMatch(i.Name)).Take(maxResults).ToList();
             }
 
             var raw = await SearchAsync(
@@ -591,58 +597,6 @@ namespace DbxProvider.Services
         private async Task RemoveTagCoreAsync(string path, string tagText)
 {
             await _client.Files.TagsRemoveAsync(NormalizePath(path), tagText);
-        }
-
-        #endregion
-
-        #region Files - Locks
-
-        public Task<List<DropboxItem>> LockFilesAsync(string path, CancellationToken cancellationToken = default) =>
-            LockFilesAsync(new[] { path }, cancellationToken);
-
-        public Task<List<DropboxItem>> LockFilesAsync(string[] paths, CancellationToken cancellationToken = default) =>
-            RetryAsync(_ => LockFilesCoreAsync(paths), cancellationToken);
-
-        private async Task<List<DropboxItem>> LockFilesCoreAsync(params string[] paths)
-{
-            var entries = paths.Select(p => new LockFileArg(NormalizePath(p))).ToList();
-            var result = await _client.Files.LockFileBatchAsync(entries);
-            return result.Entries
-                .Where(e => e.IsSuccess)
-                .Select(e => MapMetadataToItem(e.AsSuccess.Value.Metadata))
-                .ToList();
-        }
-
-        public Task<List<DropboxItem>> UnlockFilesAsync(string path, CancellationToken cancellationToken = default) =>
-            UnlockFilesAsync(new[] { path }, cancellationToken);
-
-        public Task<List<DropboxItem>> UnlockFilesAsync(string[] paths, CancellationToken cancellationToken = default) =>
-            RetryAsync(_ => UnlockFilesCoreAsync(paths), cancellationToken);
-
-        private async Task<List<DropboxItem>> UnlockFilesCoreAsync(params string[] paths)
-{
-            var entries = paths.Select(p => new UnlockFileArg(NormalizePath(p))).ToList();
-            var result = await _client.Files.UnlockFileBatchAsync(entries);
-            return result.Entries
-                .Where(e => e.IsSuccess)
-                .Select(e => MapMetadataToItem(e.AsSuccess.Value.Metadata))
-                .ToList();
-        }
-
-        public Task<List<DropboxItem>> GetFileLocksAsync(string path, CancellationToken cancellationToken = default) =>
-            GetFileLocksAsync(new[] { path }, cancellationToken);
-
-        public Task<List<DropboxItem>> GetFileLocksAsync(string[] paths, CancellationToken cancellationToken = default) =>
-            RetryAsync(_ => GetFileLocksCoreAsync(paths), cancellationToken);
-
-        private async Task<List<DropboxItem>> GetFileLocksCoreAsync(params string[] paths)
-{
-            var entries = paths.Select(p => new LockFileArg(NormalizePath(p))).ToList();
-            var result = await _client.Files.GetFileLockBatchAsync(entries);
-            return result.Entries
-                .Where(e => e.IsSuccess)
-                .Select(e => MapMetadataToItem(e.AsSuccess.Value.Metadata))
-                .ToList();
         }
 
         #endregion
@@ -991,14 +945,6 @@ namespace DbxProvider.Services
                 item.HasExplicitSharedMembers = file.HasExplicitSharedMembers ?? false;
                 item.IsDownloadable = file.IsDownloadable;
                 item.SymlinkTarget = file.SymlinkInfo?.Target ?? "";
-                if (file.FileLockInfo != null)
-                {
-                    item.LockInfo = new Models.FileLockInfo
-                    {
-                        IsLockedByMe = file.FileLockInfo.IsLockholder ?? false,
-                        Created = file.FileLockInfo.Created
-                    };
-                }
             }
             else if (metadata.IsFolder && metadata.AsFolder is FolderMetadata folder)
             {

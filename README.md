@@ -3,7 +3,7 @@
 
 # DbxProvider - PowerShell Dropbox Provider
 
-A comprehensive PowerShell module that exposes the full Dropbox API as a PowerShell provider and cmdlet set. Navigate your Dropbox like a file system and manage sharing, revisions, tags, locks, and more.
+A comprehensive PowerShell module that exposes the full Dropbox API as a PowerShell provider and cmdlet set. Navigate your Dropbox like a file system and manage sharing, revisions, tags, and more.
 
 ## Requirements
 
@@ -258,18 +258,6 @@ Get-DropboxTag /Documents/report.pdf
 
 # Remove tag
 Remove-DropboxTag /Documents/report.pdf -Tag "quarterly"
-```
-
-### File Locks
-```powershell
-# Lock files
-Lock-DropboxFile /Documents/report.docx
-
-# Check lock status
-Get-DropboxFileLock /Documents/report.docx
-
-# Unlock
-Unlock-DropboxFile /Documents/report.docx
 ```
 
 ### Temporary Links & URL Saving

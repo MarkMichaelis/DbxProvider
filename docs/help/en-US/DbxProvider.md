@@ -13,7 +13,7 @@ DbxProvider exposes the full Dropbox API as a PowerShell **provider**
 (so you can `cd Dbx:\` and use `Get-ChildItem`, `Copy-Item`,
 `Set-Content`, etc. against your Dropbox) plus a set of cmdlets for
 operations that don't fit a file-system metaphor (sharing, tags,
-locks, revisions, batched copy/move/delete, Paper, previews, and
+revisions, batched copy/move/delete, Paper, previews, and
 account info).
 
 Start with `Connect-Dropbox` to authenticate; thereafter the rest of
@@ -47,9 +47,6 @@ the cmdlets operate against the resulting `Dbx:` drive.
 ### [Get-DropboxCredential](Get-DropboxCredential.md)
 {{ Fill in the Description }}
 
-### [Get-DropboxFileLock](Get-DropboxFileLock.md)
-{{ Fill in the Description }}
-
 ### [Get-DropboxMember](Get-DropboxMember.md)
 {{ Fill in the Description }}
 
@@ -81,9 +78,6 @@ the cmdlets operate against the resulting `Dbx:` drive.
 {{ Fill in the Description }}
 
 ### [Invoke-DropboxUpload](Invoke-DropboxUpload.md)
-{{ Fill in the Description }}
-
-### [Lock-DropboxFile](Lock-DropboxFile.md)
 {{ Fill in the Description }}
 
 ### [Move-DropboxItemBatch](Move-DropboxItemBatch.md)
@@ -126,8 +120,5 @@ the cmdlets operate against the resulting `Dbx:` drive.
 {{ Fill in the Description }}
 
 ### [Set-DropboxPaper](Set-DropboxPaper.md)
-{{ Fill in the Description }}
-
-### [Unlock-DropboxFile](Unlock-DropboxFile.md)
 {{ Fill in the Description }}
 

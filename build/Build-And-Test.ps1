@@ -248,6 +248,19 @@ $path   = [DbxProvider.Services.CredentialStore]::CredentialFilePath
             Write-Warning "Functional test project not found at $functionalCsproj; skipping."
         } else {
             New-Item -ItemType Directory -Force -Path $resultsDir | Out-Null
+
+            # Seed persistent fixtures (e.g. /DbxProviderFixtures/Exportable.paper)
+            # before running tests that read them. Idempotent + best-effort:
+            # never fails the build if Dropbox is unreachable.
+            if ($secretsCheck.Ok) {
+                $seedScript = Join-Path $PSScriptRoot 'Seed-DbxTestFixtures.ps1'
+                if (Test-Path -LiteralPath $seedScript) {
+                    Invoke-Step 'Seed persistent test fixtures' {
+                        try { & $seedScript } catch { Write-Warning "Seed step failed (non-fatal): $_" }
+                    }
+                }
+            }
+
             Invoke-Step 'dotnet test (functional)' {
                 dotnet test $functionalCsproj `
                     -c $Configuration `
