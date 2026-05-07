@@ -21,7 +21,6 @@ function Get-DbxTestSecrets {
         AppSecret          = $env:DBX_APP_SECRET
         RefreshToken       = $env:DBX_REFRESH_TOKEN
         TestMemberEmail    = $env:DBX_TEST_MEMBER_EMAIL
-        RunLargeFileTests  = ($env:DBX_RUN_LARGE_FILE_TESTS -eq '1' -or $env:DBX_RUN_LARGE_FILE_TESTS -eq 'true')
     }
 
     $needMore = -not $secrets.AppKey -or -not $secrets.AppSecret -or `
@@ -41,11 +40,6 @@ function Get-DbxTestSecrets {
                             'DBX_APP_SECRET'          { if (-not $secrets.AppSecret)       { $secrets.AppSecret       = $prop.Value } }
                             'DBX_REFRESH_TOKEN'       { if (-not $secrets.RefreshToken)    { $secrets.RefreshToken    = $prop.Value } }
                             'DBX_TEST_MEMBER_EMAIL'   { if (-not $secrets.TestMemberEmail) { $secrets.TestMemberEmail = $prop.Value } }
-                            'DBX_RUN_LARGE_FILE_TESTS' {
-                                if (-not $secrets.RunLargeFileTests) {
-                                    $secrets.RunLargeFileTests = ($prop.Value -eq '1' -or $prop.Value -eq 'true' -or $prop.Value -eq $true)
-                                }
-                            }
                         }
                     }
                 }

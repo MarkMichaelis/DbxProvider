@@ -17,7 +17,9 @@
     Skip the Pester PowerShell test suite.
 
 .PARAMETER IncludeLargeFileTests
-    Set DBX_RUN_LARGE_FILE_TESTS=1 so large (>150 MB) upload tests are not skipped.
+    Deprecated; accepted for backwards compatibility but ignored. Chunked-
+    upload coverage now runs unconditionally via the xUnit functional suite
+    using small in-memory streams.
 #>
 [CmdletBinding()]
 param(
@@ -130,8 +132,7 @@ function Show-MissingSecretsHelp {
 }
 
 if ($IncludeLargeFileTests) {
-    $env:DBX_RUN_LARGE_FILE_TESTS = '1'
-    Write-Host 'DBX_RUN_LARGE_FILE_TESTS=1 (large file tests enabled)' -ForegroundColor Yellow
+    Write-Host '-IncludeLargeFileTests is deprecated and ignored. Chunked-upload coverage now runs unconditionally via the xUnit functional suite using small in-memory streams; the env var DBX_RUN_LARGE_FILE_TESTS is no longer consulted.' -ForegroundColor DarkYellow
 }
 
 $exitCodes = [System.Collections.Generic.List[int]]::new()

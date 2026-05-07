@@ -1,7 +1,6 @@
 BeforeDiscovery {
     Import-Module (Join-Path $PSScriptRoot '..\Helpers\TestEnvironment.psm1') -Force
     $script:HasCredentials = [bool]((Get-DbxTestSecrets).RefreshToken) -and [bool]((Get-DbxTestSecrets).AppKey)
-    $script:RunLarge = [bool]((Get-DbxTestSecrets).RunLargeFileTests)
 }
 
 BeforeAll {
@@ -33,22 +32,11 @@ Describe 'Invoke-DropboxUpload' -Skip:(-not $HasCredentials) {
         Test-Path -LiteralPath "$($Folder.ProviderPath)\small.txt" | Should -BeTrue
     }
 
-    It 'uploads a large (~160 MB) file via chunked session' {
-        if (-not $RunLarge) {
-            Set-ItResult -Skipped -Because 'Set DBX_RUN_LARGE_FILE_TESTS=1 (env var or user-secret) to enable the 160 MB chunked-upload test.'
-            return
-        }
-        $local = Join-Path $TestDrive 'large.bin'
-        $fs = [System.IO.File]::OpenWrite($local)
-        try {
-            $buf = New-Object byte[] (1MB)
-            for ($i = 0; $i -lt 160; $i++) { $fs.Write($buf, 0, $buf.Length) }
-        }
-        finally { $fs.Dispose() }
-
-        $remote = "$($Folder.ApiPath)/large.bin"
-        $result = Invoke-DropboxUpload -Source $local -DropboxPath $remote -DriveName 'DbxTest' -WriteMode overwrite
-        $result | Should -Not -BeNullOrEmpty
-    }
+    # Note: chunked upload-session (>150 MB) coverage lives in the xUnit
+    # functional suite (UploadDownloadTests.ChunkedUpload_RoundTrip), which
+    # uses internal test hooks to dial the 150 MB threshold down to 1 MB.
+    # That keeps CI fast (~5 s instead of ~3 min) while still exercising
+    # UploadSessionStartAsync / AppendV2Async / FinishAsync end-to-end.
 }
+
 

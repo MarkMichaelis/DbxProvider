@@ -47,16 +47,6 @@ public static class TestSecrets
     public static string? RefreshToken => Get("DBX_REFRESH_TOKEN", "DBX_REFRESH_TOKEN", s => s.RefreshToken);
     public static string? TestMemberEmail => Get("DBX_TEST_MEMBER_EMAIL", "DBX_TEST_MEMBER_EMAIL");
 
-    public static bool RunLargeFileTests
-    {
-        get
-        {
-            var v = Get("DBX_RUN_LARGE_FILE_TESTS", "DBX_RUN_LARGE_FILE_TESTS");
-            if (string.IsNullOrWhiteSpace(v)) return false;
-            return v == "1" || v.Equals("true", StringComparison.OrdinalIgnoreCase);
-        }
-    }
-
     public static bool HasCoreCredentials =>
         !string.IsNullOrWhiteSpace(AppKey) &&
         !string.IsNullOrWhiteSpace(AppSecret) &&

@@ -1,5 +1,6 @@
 using System.Text;
 using DbxProvider.FunctionalTests.Infrastructure;
+using DbxProvider.Services;
 using Xunit;
 
 namespace DbxProvider.FunctionalTests.Services;
@@ -33,26 +34,43 @@ public class UploadDownloadTests
     }
 
     [SkippableFact]
-    public async Task LargeFile_ChunkedUpload_RoundTrip()
+    public async Task ChunkedUpload_RoundTrip()
     {
+        // Exercises the upload-session code path (UploadSessionStart /
+        // AppendV2 / Finish) without uploading 150+ MB on every CI run.
+        // We dial the threshold/chunk constants down to small values via
+        // the internal test hooks, so a 5 MB file goes through 4
+        // upload-session calls instead of a single /2/files/upload call.
         TestSkip.IfUnavailable(_fixture);
-        Skip.IfNot(TestSecrets.RunLargeFileTests, "Large file tests disabled (set DBX_RUN_LARGE_FILE_TESTS=1).");
-
         var svc = _fixture.Service!;
-        var folder = await _fixture.NewTestFolderAsync(nameof(LargeFile_ChunkedUpload_RoundTrip));
+
+        const long size = 5L * 1024 * 1024;          // 5 MB total
+        const long threshold = 1L * 1024 * 1024;     // chunked path triggers above 1 MB
+        const int chunkSize = 1 * 1024 * 1024;       // 1 MB chunks  -> 5 chunks (start + 3 append + finish)
+
+        DropboxServiceClient.UploadSessionThresholdOverride = threshold;
+        DropboxServiceClient.UploadSessionChunkSizeOverride = chunkSize;
         try
         {
-            var path = $"{folder}/large.bin";
-            const long size = 160L * 1024 * 1024;
-            await using (var src = new GeneratedStream(size))
-                await svc.UploadAsync(path, src);
+            var folder = await _fixture.NewTestFolderAsync(nameof(ChunkedUpload_RoundTrip));
+            try
+            {
+                var path = $"{folder}/chunked.bin";
+                await using (var src = new GeneratedStream(size))
+                    await svc.UploadAsync(path, src);
 
-            var meta = await svc.GetMetadataAsync(path);
-            Assert.Equal((ulong)size, meta.Size);
+                var meta = await svc.GetMetadataAsync(path);
+                Assert.Equal((ulong)size, meta.Size);
+            }
+            finally
+            {
+                try { await svc.DeleteAsync(folder); } catch { }
+            }
         }
         finally
         {
-            try { await svc.DeleteAsync(folder); } catch { }
+            DropboxServiceClient.UploadSessionThresholdOverride = null;
+            DropboxServiceClient.UploadSessionChunkSizeOverride = null;
         }
     }
 

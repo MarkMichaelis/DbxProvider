@@ -460,8 +460,9 @@ pwsh ./build/Set-LocalSecrets.ps1
 ```
 
 `Build-And-Test.ps1` accepts `-Configuration`, `-SkipFunctional`,
-`-SkipPester`, and `-IncludeLargeFileTests` (the latter enables the
-opt-in >150 MB chunked-upload tests by setting `DBX_RUN_LARGE_FILE_TESTS=1`).
+`-SkipPester`. Chunked-upload coverage runs unconditionally via the xUnit
+functional suite using small in-memory streams (~5 s) and no longer requires
+any opt-in env var.
 
 Credential resolution order in both test suites:
 **environment variables → `dotnet user-secrets` → `CredentialStore` (the file

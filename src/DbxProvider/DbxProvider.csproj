@@ -12,6 +12,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="DbxProvider.FunctionalTests" />
+    <InternalsVisibleTo Include="DbxProvider.UnitTests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Dropbox.Api" Version="7.0.0" />
     <PackageReference Include="System.Management.Automation" Version="7.4.6" />
   </ItemGroup>

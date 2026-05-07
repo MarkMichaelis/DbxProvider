@@ -19,6 +19,16 @@ namespace DbxProvider.Services
         private const int UploadSessionChunkSize = 8 * 1024 * 1024;
         private const long UploadSessionThreshold = 150L * 1024 * 1024;
 
+        // Test-only overrides for chunked-upload sizing. Production callers
+        // never set these. Functional tests can dial them down (e.g. 4 MB
+        // threshold / 1 MB chunks) so the chunked-upload code path is
+        // exercised end-to-end without uploading > 150 MB on every CI run.
+        internal static long? UploadSessionThresholdOverride { get; set; }
+        internal static int? UploadSessionChunkSizeOverride { get; set; }
+
+        private static long EffectiveThreshold => UploadSessionThresholdOverride ?? UploadSessionThreshold;
+        private static int EffectiveChunkSize => UploadSessionChunkSizeOverride ?? UploadSessionChunkSize;
+
         public DropboxServiceClient(string accessToken)
         {
             _client = new DropboxClient(accessToken);
@@ -216,7 +226,7 @@ namespace DbxProvider.Services
 {
             var dbxPath = NormalizePath(path);
             mode ??= WriteMode.Overwrite.Instance;
-            if (content.CanSeek && content.Length <= UploadSessionThreshold)
+            if (content.CanSeek && content.Length <= EffectiveThreshold)
             {
                 var metadata = await _client.Files.UploadAsync(dbxPath, mode: mode, body: content);
                 return MapMetadataToItem(metadata);
@@ -226,8 +236,9 @@ namespace DbxProvider.Services
 
         private async Task<DropboxItem> UploadSessionAsync(string path, Stream content, WriteMode mode)
         {
-            var buffer = new byte[UploadSessionChunkSize];
-            int bytesRead = await content.ReadAsync(buffer, 0, UploadSessionChunkSize);
+            int chunkSize = EffectiveChunkSize;
+            var buffer = new byte[chunkSize];
+            int bytesRead = await content.ReadAsync(buffer, 0, chunkSize);
 
             using var firstChunk = new MemoryStream(buffer, 0, bytesRead);
             var session = await _client.Files.UploadSessionStartAsync(body: firstChunk);
@@ -235,10 +246,10 @@ namespace DbxProvider.Services
 
             while (true)
             {
-                bytesRead = await content.ReadAsync(buffer, 0, UploadSessionChunkSize);
+                bytesRead = await content.ReadAsync(buffer, 0, chunkSize);
                 if (bytesRead <= 0) break;
 
-                bool isLast = (content.CanSeek && content.Position >= content.Length) || bytesRead < UploadSessionChunkSize;
+                bool isLast = (content.CanSeek && content.Position >= content.Length) || bytesRead < chunkSize;
 
                 if (isLast)
                 {
