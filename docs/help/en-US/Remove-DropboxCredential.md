@@ -13,8 +13,15 @@ Deletes the saved Dropbox credentials from disk.
 
 ## SYNTAX
 
+### Single (Default)
 ```
-Remove-DropboxCredential [-ProgressAction <ActionPreference>] [-WhatIf] [-Confirm] [<CommonParameters>]
+Remove-DropboxCredential [-Account <String>] [-ProgressAction <ActionPreference>] [-WhatIf] [-Confirm]
+ [<CommonParameters>]
+```
+
+### All
+```
+Remove-DropboxCredential [-All] [-ProgressAction <ActionPreference>] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
 ## DESCRIPTION
@@ -26,7 +33,6 @@ clients keep working until the session ends or
 `Disconnect-Dropbox` is called.
 
 ## EXAMPLES
-
 
 ### Example 1
 ```powershell
@@ -43,6 +49,36 @@ PS> Remove-DropboxCredential -Confirm:$false
 Deletes the saved credentials without prompting (suitable for automation).
 
 ## PARAMETERS
+
+### -Account
+Account selector - Dropbox `accountId`, full email, or unambiguous email local-part. When omitted (and `-All` is not specified), the default account is removed.
+
+```yaml
+Type: String
+Parameter Sets: Single
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -All
+Remove every saved account (deletes the credential file).
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: All
+Aliases:
+
+Required: True
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -ProgressAction
 

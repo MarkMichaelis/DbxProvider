@@ -13,8 +13,15 @@ Returns the Dropbox credentials currently saved in the credential store.
 
 ## SYNTAX
 
+### Single (Default)
 ```
-Get-DropboxCredential [-AsPlainText] [-ProgressAction <ActionPreference>] [<CommonParameters>]
+Get-DropboxCredential [-AsPlainText] [-Account <String>] [-ProgressAction <ActionPreference>]
+ [<CommonParameters>]
+```
+
+### All
+```
+Get-DropboxCredential [-AsPlainText] [-All] [-ProgressAction <ActionPreference>] [<CommonParameters>]
 ```
 
 ## DESCRIPTION
@@ -26,7 +33,6 @@ the last save timestamp, and the file path on disk. Use
 to another machine).
 
 ## EXAMPLES
-
 
 ### Example 1
 ```powershell
@@ -43,6 +49,36 @@ PS> Get-DropboxCredential -AsPlainText
 Returns the credentials with secrets revealed. Pipe to ``ConvertTo-Json`` for backup.
 
 ## PARAMETERS
+
+### -Account
+Account selector - Dropbox `accountId`, full email, or unambiguous email local-part. When omitted, the default account is returned.
+
+```yaml
+Type: String
+Parameter Sets: Single
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -All
+List every saved account (one PSObject per account, including an `IsDefault` column).
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: All
+Aliases:
+
+Required: True
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -AsPlainText
 

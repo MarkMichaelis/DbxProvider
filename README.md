@@ -97,6 +97,48 @@ del unwanted.txt               # Remove-Item
 Test-Path Documents\report.docx
 ```
 
+## Multiple Accounts
+
+You can connect to several Dropbox accounts at the same time, each on its own
+PSDrive. Saved credentials are keyed by Dropbox `accountId` (`dbid:...`) and
+also addressable by email or the local-part of the email.
+
+```powershell
+# First account (PKCE, public app — no AppSecret).
+Connect-Dropbox -AppKey $key
+
+# Second account: pass any selector to -Account to start a fresh browser flow,
+# or to look up an already-saved account.
+Connect-Dropbox -AppKey $key -Account work@example.com
+
+# Auto-derived drive names come from the email local-part, with the first
+# domain label appended on collision (e.g. mark@a.com + mark@b.org ->
+# 'mark' and 'mark_b'). Use -DriveName to override.
+Connect-Dropbox -AppKey $key -Account mark@b.org -DriveName MarkB
+
+# Confidential app variant — supply -AppSecret as well.
+Connect-Dropbox -AppKey $key -AppSecret $secret -Account work@example.com
+
+# Both drives are independent; cd between them at will.
+Get-ChildItem mark:\
+Get-ChildItem work:\
+```
+
+Manage saved accounts:
+
+```powershell
+Get-DropboxCredential -All                       # list every saved account
+Get-DropboxCredential -Account work@example.com  # one account
+Set-DropboxCredential -Account dbid:AAA... -SetDefault
+Remove-DropboxCredential -Account work@example.com
+Remove-DropboxCredential -All                    # wipe credential store
+```
+
+`-Account` accepts any of: the full `dbid:` accountId, the email address,
+or the email's local-part. Ambiguous local-parts (multiple accounts share
+the same `local@`) raise an error — use the full email or accountId in that
+case.
+
 ## Provider Operations (Standard Cmdlets)
 
 | PowerShell Cmdlet     | Dropbox API               | Description                  |

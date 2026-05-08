@@ -15,8 +15,9 @@ Authenticates to Dropbox and creates a PSDrive for the account.
 
 ### OAuth (Default)
 ```
-Connect-Dropbox [-AppKey <String>] [-AppSecret <String>] [-RefreshToken <String>] [-RedirectPort <Int32>]
- [-NoSave] [-DriveName <String>] [-ProgressAction <ActionPreference>] [<CommonParameters>]
+Connect-Dropbox [-AppKey <String>] [-AppSecret <String>] [-RefreshToken <String>] [-Account <String>]
+ [-RedirectPort <Int32>] [-NoSave] [-DriveName <String>] [-ProgressAction <ActionPreference>]
+ [<CommonParameters>]
 ```
 
 ### Token
@@ -51,7 +52,6 @@ switch to the drive by typing `Dbx:` (mirroring `C:` for the
 filesystem provider).
 
 ## EXAMPLES
-
 
 ### Example 1
 ```powershell
@@ -99,6 +99,21 @@ Accept pipeline input: False
 Accept wildcard characters: False
 ```
 
+### -Account
+Selects which saved account's credentials to load (Dropbox `accountId`, full email, or unambiguous email local-part). When omitted, the default account is used. When the selector matches no saved account and `-AppKey` is supplied, a fresh OAuth flow runs and the resulting credentials are persisted under the newly-discovered `accountId`.
+
+```yaml
+Type: String
+Parameter Sets: OAuth
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
 ### -AppKey
 
 Dropbox app key (client ID) issued by the Dropbox App Console. Required for the OAuth flow unless one is already saved in the credential store.
@@ -132,7 +147,6 @@ Accept wildcard characters: False
 ```
 
 ### -DriveName
-
 
 Name of the Dropbox PSDrive previously created by `Connect-Dropbox`.
 Defaults to `Dbx`. Specify a different name when you have connected

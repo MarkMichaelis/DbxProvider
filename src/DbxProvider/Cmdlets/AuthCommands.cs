@@ -41,6 +41,17 @@ namespace DbxProvider.Cmdlets
         public string? RefreshToken { get; set; }
 
         /// <summary>
+        /// Selects which saved account's credentials to load (Dropbox accountId,
+        /// email, or unambiguous email local-part). When omitted, the default
+        /// account is used. When the selector matches no saved account, a
+        /// fresh OAuth flow is run (you must pass -AppKey) and the resulting
+        /// credentials are persisted under the newly-discovered accountId.
+        /// </summary>
+        [Parameter(ParameterSetName = OAuthSet)]
+        [ArgumentCompleter(typeof(AccountSelectorCompleter))]
+        public string? Account { get; set; }
+
+        /// <summary>
         /// Local TCP port the OAuth callback listener binds to. Must match a redirect URI
         /// registered in the Dropbox App Console (e.g. http://localhost:52475/).
         /// </summary>
@@ -71,14 +82,27 @@ namespace DbxProvider.Cmdlets
                 }
                 else
                 {
-                    var stored = CredentialStore.Load();
-                    appKey ??= stored?.AppKey;
-                    appSecret ??= stored?.AppSecret;
-                    refreshToken ??= stored?.RefreshToken;
+                    StoredAccountEntry? saved = null;
+                    try
+                    {
+                        saved = CredentialStore.ResolveEntry(Account, throwOnAmbiguous: true);
+                    }
+                    catch (InvalidOperationException ex)
+                    {
+                        ThrowTerminatingError(new ErrorRecord(ex, "AmbiguousAccount",
+                            ErrorCategory.InvalidArgument, Account));
+                        return;
+                    }
+
+                    appKey       ??= saved?.Account.AppKey;
+                    appSecret    ??= saved?.Account.AppSecret;
+                    refreshToken ??= saved?.Account.RefreshToken;
 
                     if (!string.IsNullOrEmpty(refreshToken) && !string.IsNullOrEmpty(appKey))
                     {
-                        WriteVerbose("Reusing saved refresh token (no browser flow needed).");
+                        WriteVerbose(saved != null
+                            ? $"Reusing saved refresh token for {saved.Account.Email ?? saved.Account.AccountId ?? saved.Key}."
+                            : "Reusing saved refresh token (no browser flow needed).");
                         service = new DropboxServiceClient(refreshToken, appKey, appSecret ?? string.Empty);
                     }
                     else if (!string.IsNullOrEmpty(appKey))
@@ -110,14 +134,36 @@ namespace DbxProvider.Cmdlets
                 if (ParameterSetName == OAuthSet && !NoSave.IsPresent &&
                     (!string.IsNullOrEmpty(appKey) || !string.IsNullOrEmpty(refreshToken)))
                 {
-                    CredentialStore.Save(appKey, appSecret, refreshToken);
+                    CredentialStore.SaveAccount(new StoredAccount
+                    {
+                        AppKey       = appKey,
+                        AppSecret    = appSecret,
+                        RefreshToken = refreshToken,
+                        AccountId    = account.AccountId,
+                        Email        = account.Email,
+                        DisplayName  = account.DisplayName
+                    });
                     if (!string.IsNullOrEmpty(CredentialStore.LastSaveWarning))
                         WriteWarning(CredentialStore.LastSaveWarning);
                     WriteVerbose($"Credentials saved to {CredentialStore.CredentialFilePath}.");
                 }
 
+                // Auto-derive a drive name from the account email when the caller
+                // did not pass -DriveName explicitly and the request was scoped to
+                // a specific account. Keeps multi-account workflows ergonomic
+                // (e.g. mark@a.com -> "mark"; collisions append the domain label
+                // and then a numeric suffix).
+                var effectiveDriveName = DriveName;
+                if (!MyInvocation.BoundParameters.ContainsKey("DriveName")
+                    && !string.IsNullOrEmpty(Account)
+                    && !string.IsNullOrEmpty(account.Email))
+                {
+                    var derived = DeriveDriveName(account.Email);
+                    if (!string.IsNullOrEmpty(derived)) effectiveDriveName = derived;
+                }
+
                 var driveInfo = new PSDriveInfo(
-                    DriveName, SessionState.Provider.GetOne("Dropbox"),
+                    effectiveDriveName, SessionState.Provider.GetOne("Dropbox"),
                     "\\", $"Dropbox ({account.Email})", null);
 
                 var dbxDrive = new DropboxDriveInfo(driveInfo, service);
@@ -131,15 +177,15 @@ namespace DbxProvider.Cmdlets
                 {
                     SessionState.InvokeCommand.InvokeScript(
                         false,
-                        ScriptBlock.Create($"Set-Item -Path function:global:{DriveName}: -Value {{ Set-Location -LiteralPath '{DriveName}:' }}"),
+                        ScriptBlock.Create($"Set-Item -Path function:global:{effectiveDriveName}: -Value {{ Set-Location -LiteralPath '{effectiveDriveName}:' }}"),
                         null);
                 }
                 catch (Exception ex)
                 {
-                    WriteVerbose($"Could not register '{DriveName}:' shortcut function: {ex.Message}");
+                    WriteVerbose($"Could not register '{effectiveDriveName}:' shortcut function: {ex.Message}");
                 }
 
-                Host.UI.WriteLine($"Connected to Dropbox as {account.DisplayName}. Use '{DriveName}:' to navigate.");
+                Host.UI.WriteLine($"Connected to Dropbox as {account.DisplayName}. Use '{effectiveDriveName}:' to navigate.");
                 if (obtainedNewRefreshToken && NoSave.IsPresent && !string.IsNullOrEmpty(refreshToken))
                 {
                     Host.UI.WriteLine($"Refresh token (save for future use): {refreshToken}");
@@ -308,6 +354,54 @@ namespace DbxProvider.Cmdlets
             Host.UI.WriteLine("                sharing.read,        sharing.write,");
             Host.UI.WriteLine("                account_info.read    (Permissions tab; click Submit)");
             Host.UI.WriteLine("--------------------------------");
+        }
+
+        /// <summary>
+        /// Derives a PSDrive name from an account email's local-part. Falls
+        /// back to "&lt;localpart&gt;_&lt;first-domain-label&gt;" if a drive with the
+        /// preferred name already exists, then "_2", "_3", ... so concurrent
+        /// connections never clobber each other.
+        /// </summary>
+        private string DeriveDriveName(string email)
+        {
+            var atIdx = email.IndexOf('@');
+            if (atIdx <= 0) return string.Empty;
+            var local  = SanitizeDriveName(email.Substring(0, atIdx));
+            var domain = email.Substring(atIdx + 1);
+            if (string.IsNullOrEmpty(local)) return string.Empty;
+
+            if (!DriveExists(local)) return local;
+
+            var dot = domain.IndexOf('.');
+            var firstLabel = SanitizeDriveName(dot > 0 ? domain.Substring(0, dot) : domain);
+            var withDomain = string.IsNullOrEmpty(firstLabel) ? local : (local + "_" + firstLabel);
+            if (!DriveExists(withDomain)) return withDomain;
+
+            for (var i = 2; i < 100; i++)
+            {
+                var candidate = withDomain + "_" + i.ToString(CultureInfo.InvariantCulture);
+                if (!DriveExists(candidate)) return candidate;
+            }
+            return withDomain + "_" + Guid.NewGuid().ToString("N").Substring(0, 6);
+        }
+
+        private static string SanitizeDriveName(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return string.Empty;
+            var sb = new StringBuilder(raw.Length);
+            foreach (var c in raw)
+            {
+                if (char.IsLetterOrDigit(c) || c == '_') sb.Append(c);
+            }
+            if (sb.Length == 0) return string.Empty;
+            if (char.IsDigit(sb[0])) sb.Insert(0, '_');
+            return sb.ToString();
+        }
+
+        private bool DriveExists(string name)
+        {
+            try { return SessionState.Drive.Get(name) != null; }
+            catch { return false; }
         }
     }
 

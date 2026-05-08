@@ -14,8 +14,8 @@ Saves Dropbox credentials to the per-user credential store.
 ## SYNTAX
 
 ```
-Set-DropboxCredential [-AppKey <String>] [-AppSecret <String>] [-RefreshToken <String>]
- [-ProgressAction <ActionPreference>] [<CommonParameters>]
+Set-DropboxCredential [-AppKey <String>] [-AppSecret <String>] [-RefreshToken <String>] [-Account <String>]
+ [-SetDefault] [-ProgressAction <ActionPreference>] [<CommonParameters>]
 ```
 
 ## DESCRIPTION
@@ -26,7 +26,6 @@ re-auth. Existing values are preserved when the corresponding parameter
 is omitted, allowing you to update one field at a time.
 
 ## EXAMPLES
-
 
 ### Example 1
 ```powershell
@@ -43,6 +42,21 @@ PS> Set-DropboxCredential -RefreshToken $token
 Updates only the refresh token (e.g. after rotation).
 
 ## PARAMETERS
+
+### -Account
+Account selector - Dropbox `accountId`, full email, or unambiguous email local-part. When omitted (and `-All` is not specified), the default account is updated. When the selector matches no saved account, an `accountId` (`dbid:...`) or full email creates a new entry.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -AppKey
 
@@ -105,6 +119,21 @@ Aliases:
 Required: False
 Position: Named
 Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -SetDefault
+After saving, mark this account as the default - used by `Connect-Dropbox` and the credential cmdlets when no `-Account` selector is given.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
 Accept pipeline input: False
 Accept wildcard characters: False
 ```
