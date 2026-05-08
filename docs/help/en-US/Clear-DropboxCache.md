@@ -14,7 +14,8 @@ Removes one or all entries from the Dropbox metadata cache.
 ## SYNTAX
 
 ```
-Clear-DropboxCache [[-Path] <String>] [-DriveName <String>] [-ProgressAction <ActionPreference>] [<CommonParameters>]
+Clear-DropboxCache [[-Path] <String>] [-DriveName <String>] [-ProgressAction <ActionPreference>]
+ [<CommonParameters>]
 ```
 
 ## DESCRIPTION
@@ -41,22 +42,6 @@ Drops just the `/Photos` cache entry.
 
 ## PARAMETERS
 
-### -Path
-
-Dropbox path whose cached entry should be cleared. Omit to clear the entire cache.
-
-```yaml
-Type: String
-Parameter Sets: (All)
-Aliases:
-
-Required: False
-Position: 0
-Default value: None
-Accept pipeline input: False
-Accept wildcard characters: False
-```
-
 ### -DriveName
 
 Name of the Dropbox PSDrive. Defaults to `Dbx`.
@@ -69,6 +54,22 @@ Aliases:
 Required: False
 Position: Named
 Default value: Dbx
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Path
+
+Dropbox path whose cached entry should be cleared. Omit to clear the entire cache.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 0
+Default value: None
 Accept pipeline input: False
 Accept wildcard characters: False
 ```

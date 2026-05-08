@@ -15,7 +15,8 @@ Eagerly validates one or all cache entries by calling
 ## SYNTAX
 
 ```
-Update-DropboxCache [[-Path] <String>] [-DriveName <String>] [-ProgressAction <ActionPreference>] [<CommonParameters>]
+Update-DropboxCache [[-Path] <String>] [-DriveName <String>] [-ProgressAction <ActionPreference>]
+ [<CommonParameters>]
 ```
 
 ## DESCRIPTION
@@ -35,22 +36,6 @@ Applies any pending deltas to the root folder's cache entry.
 
 ## PARAMETERS
 
-### -Path
-
-Dropbox path whose cache should be refreshed. Omit to refresh every cached entry.
-
-```yaml
-Type: String
-Parameter Sets: (All)
-Aliases:
-
-Required: False
-Position: 0
-Default value: None
-Accept pipeline input: False
-Accept wildcard characters: False
-```
-
 ### -DriveName
 
 Name of the Dropbox PSDrive. Defaults to `Dbx`.
@@ -63,6 +48,22 @@ Aliases:
 Required: False
 Position: Named
 Default value: Dbx
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Path
+
+Dropbox path whose cache should be refreshed. Omit to refresh every cached entry.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 0
+Default value: None
 Accept pipeline input: False
 Accept wildcard characters: False
 ```

@@ -60,6 +60,22 @@ Accept pipeline input: False
 Accept wildcard characters: False
 ```
 
+### -DriveName
+
+Name of the Dropbox PSDrive. Defaults to `Dbx`.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: Dbx
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
 ### -Enable
 
 Turn the cache on (counterpart to `-Disable`).
@@ -72,22 +88,6 @@ Aliases:
 Required: False
 Position: Named
 Default value: False
-Accept pipeline input: False
-Accept wildcard characters: False
-```
-
-### -MaxEntries
-
-Soft cap on cached folders before LRU eviction kicks in.
-
-```yaml
-Type: Int32
-Parameter Sets: (All)
-Aliases:
-
-Required: False
-Position: Named
-Default value: None
 Accept pipeline input: False
 Accept wildcard characters: False
 ```
@@ -108,18 +108,18 @@ Accept pipeline input: False
 Accept wildcard characters: False
 ```
 
-### -DriveName
+### -MaxEntries
 
-Name of the Dropbox PSDrive. Defaults to `Dbx`.
+Soft cap on cached folders before LRU eviction kicks in.
 
 ```yaml
-Type: String
+Type: Int32
 Parameter Sets: (All)
 Aliases:
 
 Required: False
 Position: Named
-Default value: Dbx
+Default value: None
 Accept pipeline input: False
 Accept wildcard characters: False
 ```
