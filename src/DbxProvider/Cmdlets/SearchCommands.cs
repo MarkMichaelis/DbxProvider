@@ -69,6 +69,16 @@ namespace DbxProvider.Cmdlets
             {
                 var service = GetService();
 
+                if (!Wildcard && ContainsWildcardChars(Query))
+                {
+                    WriteVerbose(
+                        $"Query '{Query}' contains wildcard characters (*, ?, [). " +
+                        "Dropbox's search_v2 API is prefix-token-based and treats these as literals; " +
+                        "switching to -Wildcard mode for PowerShell glob semantics. " +
+                        "Pass -Wildcard explicitly to suppress this message.");
+                    Wildcard = true;
+                }
+
                 if (Wildcard)
                 {
                     var items = service.SearchByFilenameAsync(Query, Path, MaxResults)
@@ -113,6 +123,9 @@ namespace DbxProvider.Cmdlets
                     ErrorCategory.ReadError, Query));
             }
         }
+
+        private static bool ContainsWildcardChars(string? value)
+            => !string.IsNullOrEmpty(value) && value.IndexOfAny(new[] { '*', '?', '[' }) >= 0;
 
         private static Dropbox.Api.Files.FileCategory MapCategory(string name) =>
             name.ToLowerInvariant() switch

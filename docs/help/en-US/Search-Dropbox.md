@@ -14,9 +14,8 @@ Searches for files and folders by name or content in Dropbox.
 ## SYNTAX
 
 ```
-Search-Dropbox [-Query] <String> [-Path <String>] [-MaxResults <Int32>] [-IncludeHighlights]
- [-FilenameOnly] [-FileExtensions <String[]>] [-FileCategory <String[]>]
- [-FileStatus <String>] [-OrderBy <String>] [-Wildcard]
+Search-Dropbox [-Query] <String> [-Path <String>] [-MaxResults <Int32>] [-IncludeHighlights] [-FilenameOnly]
+ [-FileExtensions <String[]>] [-FileCategory <String[]>] [-FileStatus <String>] [-OrderBy <String>] [-Wildcard]
  [-DriveName <String>] [-ProgressAction <ActionPreference>] [<CommonParameters>]
 ```
 
@@ -39,7 +38,6 @@ cap the page size, and `-IncludeHighlights` to receive snippet
 highlights in the result objects.
 
 ## EXAMPLES
-
 
 ### Example 1
 ```powershell
@@ -82,6 +80,78 @@ Accept pipeline input: False
 Accept wildcard characters: False
 ```
 
+### -FileCategory
+
+Server-side filter on Dropbox file categories. Valid values:
+`Image`, `Document`, `Pdf`, `Spreadsheet`, `Presentation`, `Audio`,
+`Video`, `Folder`, `Paper`, `Others`.
+
+```yaml
+Type: String[]
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -FileExtensions
+
+Server-side filter on file extensions (e.g. `pdf`, `docx`). This is the
+correct way to do an `*.docx`-style filter - `-Query "*.docx"` will not
+work because Dropbox treats `*` as a literal token character.
+
+```yaml
+Type: String[]
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -FilenameOnly
+
+Restrict matching to filenames; skip file content indexing. Faster and
+avoids false positives from document contents. Does NOT enable
+wildcards (Dropbox search is prefix-token-based; use `-Wildcard` for
+PowerShell wildcard semantics).
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -FileStatus
+
+Search active or deleted files. Valid values: `Active`, `Deleted`.
+Defaults to `Active`.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: Active
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
 ### -IncludeHighlights
 
 Include match highlights / snippets on each result.
@@ -110,6 +180,23 @@ Aliases:
 Required: False
 Position: Named
 Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -OrderBy
+
+Result ordering. Valid values: `Relevance`, `LastModifiedTime`. Defaults
+to `Relevance`.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: Relevance
 Accept pipeline input: False
 Accept wildcard characters: False
 ```
@@ -159,95 +246,6 @@ Aliases:
 Required: True
 Position: 0
 Default value: None
-Accept pipeline input: False
-Accept wildcard characters: False
-```
-
-### -FilenameOnly
-
-Restrict matching to filenames; skip file content indexing. Faster and
-avoids false positives from document contents. Does NOT enable
-wildcards (Dropbox search is prefix-token-based; use `-Wildcard` for
-PowerShell wildcard semantics).
-
-```yaml
-Type: SwitchParameter
-Parameter Sets: (All)
-Aliases:
-
-Required: False
-Position: Named
-Default value: False
-Accept pipeline input: False
-Accept wildcard characters: False
-```
-
-### -FileExtensions
-
-Server-side filter on file extensions (e.g. `pdf`, `docx`). This is the
-correct way to do an `*.docx`-style filter — `-Query "*.docx"` will not
-work because Dropbox treats `*` as a literal token character.
-
-```yaml
-Type: String[]
-Parameter Sets: (All)
-Aliases:
-
-Required: False
-Position: Named
-Default value: None
-Accept pipeline input: False
-Accept wildcard characters: False
-```
-
-### -FileCategory
-
-Server-side filter on Dropbox file categories. Valid values:
-`Image`, `Document`, `Pdf`, `Spreadsheet`, `Presentation`, `Audio`,
-`Video`, `Folder`, `Paper`, `Others`.
-
-```yaml
-Type: String[]
-Parameter Sets: (All)
-Aliases:
-
-Required: False
-Position: Named
-Default value: None
-Accept pipeline input: False
-Accept wildcard characters: False
-```
-
-### -FileStatus
-
-Search active or deleted files. Valid values: `Active`, `Deleted`.
-Defaults to `Active`.
-
-```yaml
-Type: String
-Parameter Sets: (All)
-Aliases:
-
-Required: False
-Position: Named
-Default value: Active
-Accept pipeline input: False
-Accept wildcard characters: False
-```
-
-### -OrderBy
-
-Result ordering. Valid values: `Relevance`, `LastModifiedTime`. Defaults
-to `Relevance`.
-
-```yaml
-Type: String
-Parameter Sets: (All)
-Aliases:
-
-Required: False
-Position: Named
-Default value: Relevance
 Accept pipeline input: False
 Accept wildcard characters: False
 ```
