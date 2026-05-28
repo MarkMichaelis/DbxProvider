@@ -100,7 +100,7 @@ Accept wildcard characters: False
 ```
 
 ### -Account
-Selects which saved account's credentials to load (Dropbox `accountId`, full email, or unambiguous email local-part). When omitted, the default account is used. When the selector matches no saved account and `-AppKey` is supplied, a fresh OAuth flow runs and the resulting credentials are persisted under the newly-discovered `accountId`.
+Selects which saved account's credentials to load (Dropbox `accountId`, full email, or unambiguous email local-part). When omitted, the default account is used. When the selector matches no saved account and `-AppKey` is supplied, a fresh OAuth flow runs and the resulting credentials are persisted under the newly-discovered `accountId`. When the selector matches no saved account and `-AppKey` is **not** supplied, the cmdlet automatically reuses an `AppKey` from another saved account (preferring the default account's) so adding a new user only requires `Connect-Dropbox -Account <selector>`. Refresh tokens are never shared across accounts.
 
 ```yaml
 Type: String

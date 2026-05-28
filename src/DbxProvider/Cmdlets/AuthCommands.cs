@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Management.Automation;
 using System.Net;
 using System.Text;
@@ -97,6 +99,27 @@ namespace DbxProvider.Cmdlets
                     appKey       ??= saved?.Account.AppKey;
                     appSecret    ??= saved?.Account.AppSecret;
                     refreshToken ??= saved?.Account.RefreshToken;
+
+                    // When the caller asked for a specific account that isn't saved
+                    // yet, the same Dropbox app can still authenticate the new user.
+                    // Reuse the AppKey (and AppSecret) from any already-saved account
+                    // so the user doesn't have to re-paste -AppKey for every new
+                    // account. We deliberately do NOT copy a RefreshToken — that
+                    // belongs to another user.
+                    if (saved == null
+                        && string.IsNullOrEmpty(appKey)
+                        && !MyInvocation.BoundParameters.ContainsKey(nameof(AppKey)))
+                    {
+                        var fallback = PickFallbackApp(CredentialStore.ListAccounts());
+                        if (fallback != null)
+                        {
+                            appKey    = fallback.Value.AppKey;
+                            appSecret = fallback.Value.AppSecret;
+                            WriteVerbose(
+                                $"Reusing AppKey from saved account '{fallback.Value.SourceLabel}' " +
+                                $"to authenticate '{Account}'.");
+                        }
+                    }
 
                     if (!string.IsNullOrEmpty(refreshToken) && !string.IsNullOrEmpty(appKey))
                     {
@@ -354,6 +377,45 @@ namespace DbxProvider.Cmdlets
             Host.UI.WriteLine("                sharing.read,        sharing.write,");
             Host.UI.WriteLine("                account_info.read    (Permissions tab; click Submit)");
             Host.UI.WriteLine("--------------------------------");
+        }
+
+        /// <summary>
+        /// Picks an AppKey/AppSecret to reuse for a brand-new account that
+        /// isn't yet saved. Selection order: the default account first, then
+        /// the first listed account that has an AppKey. Returns <c>null</c> if
+        /// no saved account has an AppKey.
+        ///
+        /// <para>
+        /// Deliberately exposes only AppKey/AppSecret (the app identity), not
+        /// RefreshToken (the user identity). Reusing a refresh token across
+        /// accounts would authenticate the wrong user.
+        /// </para>
+        /// </summary>
+        internal static FallbackApp? PickFallbackApp(IReadOnlyList<StoredAccountEntry> accounts)
+        {
+            if (accounts == null || accounts.Count == 0) return null;
+
+            var preferred = accounts.FirstOrDefault(a => a.IsDefault && !string.IsNullOrEmpty(a.Account.AppKey))
+                            ?? accounts.FirstOrDefault(a => !string.IsNullOrEmpty(a.Account.AppKey));
+            if (preferred == null) return null;
+
+            return new FallbackApp(
+                preferred.Account.AppKey!,
+                preferred.Account.AppSecret,
+                preferred.Account.Email ?? preferred.Key);
+        }
+
+        internal readonly struct FallbackApp
+        {
+            public FallbackApp(string appKey, string? appSecret, string sourceLabel)
+            {
+                AppKey = appKey;
+                AppSecret = appSecret;
+                SourceLabel = sourceLabel;
+            }
+            public string AppKey { get; }
+            public string? AppSecret { get; }
+            public string SourceLabel { get; }
         }
 
         /// <summary>

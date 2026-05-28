@@ -28,6 +28,10 @@ $env:DbxSkipHelpBuild = 'true'
 dotnet build src\DbxProvider\DbxProvider.csproj -c Release
 ```
 
+Once built, see [Installation](#installation) — in particular the
+**Developing DbxProvider** subsection — for the recommended way to load the
+just-built module without locking `bin\` for other sessions.
+
 ## Authoring help for a new cmdlet
 
 Help is authored in PlatyPS markdown under `docs\help\en-US\`. To add
@@ -60,15 +64,120 @@ a new cmdlet:
 
 ## Installation
 
-```powershell
-# After building, import the module:
-Import-Module .\src\DbxProvider\bin\Release\net8.0\DbxProvider.dll
+There are two supported workflows: **Using** DbxProvider as a consumer, and
+**Developing** DbxProvider while iterating on the code. Pick the one that
+matches what you're doing — the rest of this section spells each out.
 
-# Or copy the output to a PowerShell module directory:
-$modPath = "$env:USERPROFILE\Documents\PowerShell\Modules\DbxProvider\1.0.0"
-Copy-Item .\src\DbxProvider\bin\Release\net8.0\* $modPath -Recurse
-Import-Module DbxProvider
+### Using DbxProvider
+
+One-time install; `Import-Module DbxProvider` then works from any new pwsh
+session, with no dependency on the build output directory.
+
+```powershell
+pwsh -NoProfile -File .\build\Install-Module.ps1 -Configuration Release
 ```
+
+This copies the built module to the **CurrentUser** PowerShell module path
+(under `Documents\PowerShell\Modules\DbxProvider\<version>`, resolved via
+`[Environment]::GetFolderPath('MyDocuments')` — so OneDrive-redirected
+Documents folders are handled correctly). Then, in any new pwsh:
+
+```powershell
+Import-Module DbxProvider
+(Get-Module DbxProvider).Path   # confirm it loaded from the install path
+```
+
+Other useful switches on `Install-Module.ps1`:
+
+- `-Scope AllUsers` — machine-wide install (requires admin).
+- `-Destination <path>` — install to a custom module root.
+- `-NoBuild` — skip `dotnet build` (assumes the configuration is already built).
+- `-Force` — retry the install when the existing copy appears locked.
+
+### Developing DbxProvider
+
+When you're modifying the provider, you generally do **not** want to
+overwrite the consumer install on every rebuild. Two patterns are supported;
+pick per situation.
+
+#### Pattern A — Ephemeral, this pwsh instance only
+
+Best for: rebuild &rarr; smoke-test loop in the **current** shell.
+
+```powershell
+dotnet build src\DbxProvider\DbxProvider.csproj -c Debug
+Import-Module .\src\DbxProvider\bin\Debug\net8.0\DbxProvider.psd1 -Force
+```
+
+Notes:
+
+- Import the **`.psd1`** manifest, not the bare `DbxProvider.dll`. The manifest
+  is what registers `FormatsToProcess` (the `Mode / Size / Modified / Name`
+  table for `Get-ChildItem` output) and other module metadata. Importing the
+  raw DLL loads the cmdlets but drops formatting, and `dir Dbx:\` then falls
+  back to `Format-List` output (one property per line).
+- The DLL is loaded directly from `bin\`; nothing is copied.
+- That pwsh process now **locks** the DLL until it exits — the next
+  `dotnet build` will fail until you close the session (or run
+  `Stop-DbxProviderHolders.ps1`, below).
+- `-Force` re-imports the cmdlets, but it cannot unload the assembly from
+  the same process. For a truly clean reload, start a new pwsh.
+- Pair with `$env:DbxSkipHelpBuild = 'true'` (see [Building](#building)) for
+  the fastest inner loop.
+
+#### Pattern B — Side-by-side dev install
+
+Best for: keeping a **stable** `DbxProvider` available for everyday use AND
+a **work-in-progress** copy you can iterate on, each loadable by name in
+separate pwsh sessions.
+
+```powershell
+# Stable consumer install (once):
+pwsh -NoProfile -File .\build\Install-Module.ps1 -Configuration Release
+
+# WIP dev install (re-run after each rebuild):
+pwsh -NoProfile -File .\build\Install-Module.ps1 -Name DbxProvider.Dev -Configuration Debug
+```
+
+Then, in two separate pwsh sessions:
+
+```powershell
+# Session 1 — stable
+pwsh
+Import-Module DbxProvider
+
+# Session 2 — work in progress
+pwsh
+Import-Module DbxProvider.Dev
+```
+
+Both installs cannot be loaded into the **same** pwsh process — they share
+an assembly identity (`DbxProvider.dll`, same version). Use separate pwsh
+sessions, or `pwsh -NoProfile -Command "..."` subprocesses for short-lived
+comparisons.
+
+#### Picking between A and B
+
+| Situation                                          | Use     |
+|----------------------------------------------------|---------|
+| Quick rebuild + try in the current shell           | **A**   |
+| Want stable available everywhere AND a WIP copy    | **B**   |
+| Other tools/users import DbxProvider on this box   | **B**   |
+| You'll exit and restart pwsh frequently anyway     | **A**   |
+
+#### When the DLL is locked
+
+If a `dotnet build` or `Install-Module.ps1` run fails because another pwsh
+session still has the assembly loaded:
+
+```powershell
+.\Stop-DbxProviderHolders.ps1
+pwsh -NoProfile -File .\build\Install-Module.ps1 -Force
+```
+
+`Stop-DbxProviderHolders.ps1` scans for processes that have `DbxProvider*.dll`
+loaded as a module (or open as a file handle) and stops them, then verifies
+the locks are released.
 
 ## Quick Start
 
@@ -119,10 +228,20 @@ Connect-Dropbox -AppKey $key -Account mark@b.org -DriveName MarkB
 # Confidential app variant — supply -AppSecret as well.
 Connect-Dropbox -AppKey $key -AppSecret $secret -Account work@example.com
 
+# Once ANY account is connected, -AppKey is reused automatically. Adding
+# another account is just:
+Connect-Dropbox -Account other@example.com
+
 # Both drives are independent; cd between them at will.
 Get-ChildItem mark:\
 Get-ChildItem work:\
 ```
+
+`-AppKey` is only required the first time you connect on a machine. The
+provider stores it with the account, and subsequent `Connect-Dropbox
+-Account <new>` calls reuse a saved `AppKey` (preferring the default
+account's) to launch the browser flow for the new user. Refresh tokens are
+never shared across accounts — each user gets their own.
 
 Manage saved accounts:
 
