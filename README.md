@@ -213,35 +213,42 @@ PSDrive. Saved credentials are keyed by Dropbox `accountId` (`dbid:...`) and
 also addressable by email or the local-part of the email.
 
 ```powershell
-# First account (PKCE, public app — no AppSecret).
-Connect-Dropbox -AppKey $key
+# First-run on a fresh machine — no flags needed. Connect-Dropbox opens the
+# Dropbox app-creation page, prints the values to paste, prompts you for the
+# resulting AppKey, then completes the OAuth browser flow.
+Connect-Dropbox
 
-# Second account: pass any selector to -Account to start a fresh browser flow,
-# or to look up an already-saved account.
-Connect-Dropbox -AppKey $key -Account work@example.com
+# Add another account. -Account that doesn't yet exist triggers the same
+# wizard so each user can register their own Dropbox app (required while
+# the app is still in Development status).
+Connect-Dropbox -Account work@example.com
 
 # Auto-derived drive names come from the email local-part, with the first
 # domain label appended on collision (e.g. mark@a.com + mark@b.org ->
 # 'mark' and 'mark_b'). Use -DriveName to override.
-Connect-Dropbox -AppKey $key -Account mark@b.org -DriveName MarkB
+Connect-Dropbox -Account mark@b.org -DriveName MarkB
+
+# Skip the wizard by passing -AppKey directly (e.g. in scripts).
+Connect-Dropbox -AppKey $key -Account work@example.com
 
 # Confidential app variant — supply -AppSecret as well.
 Connect-Dropbox -AppKey $key -AppSecret $secret -Account work@example.com
-
-# Once ANY account is connected, -AppKey is reused automatically. Adding
-# another account is just:
-Connect-Dropbox -Account other@example.com
 
 # Both drives are independent; cd between them at will.
 Get-ChildItem mark:\
 Get-ChildItem work:\
 ```
 
-`-AppKey` is only required the first time you connect on a machine. The
-provider stores it with the account, and subsequent `Connect-Dropbox
--Account <new>` calls reuse a saved `AppKey` (preferring the default
-account's) to launch the browser flow for the new user. Refresh tokens are
-never shared across accounts — each user gets their own.
+The interactive registration wizard runs whenever `Connect-Dropbox` cannot
+find a saved credential for the requested account and `-AppKey` was not
+supplied. It opens the Dropbox app-creation page, displays the redirect URI
+and required scopes, and prompts you to paste the resulting AppKey. Each
+Dropbox user gets their own app + refresh token; refresh tokens are never
+shared across accounts. Once your app is approved for **Production** status
+in the Dropbox App Console you can re-use a single AppKey for many users
+(just pass `-AppKey` explicitly), but while the app is in **Development**
+mode only the app owner's Dropbox account can authorize it, which is why
+the wizard registers a fresh app per user by default.
 
 Manage saved accounts:
 

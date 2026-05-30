@@ -40,7 +40,9 @@ Three usage modes are supported:
   listens on a local redirect URI, and obtains an offline refresh token.
 - **Reuse mode**: `Connect-Dropbox` with no parameters reuses
   credentials previously saved by `Set-DropboxCredential` or by an
-  earlier OAuth connect.
+  earlier OAuth connect. If nothing is saved (or `-Account` selects a
+  not-yet-registered user), an interactive wizard opens the Dropbox
+  app-creation page and prompts for the new AppKey.
 
 Unless `-NoSave` is specified, the AppKey / AppSecret / RefreshToken
 are persisted via the platform's credential store
@@ -100,7 +102,7 @@ Accept wildcard characters: False
 ```
 
 ### -Account
-Selects which saved account's credentials to load (Dropbox `accountId`, full email, or unambiguous email local-part). When omitted, the default account is used. When the selector matches no saved account and `-AppKey` is supplied, a fresh OAuth flow runs and the resulting credentials are persisted under the newly-discovered `accountId`. When the selector matches no saved account and `-AppKey` is **not** supplied, the cmdlet automatically reuses an `AppKey` from another saved account (preferring the default account's) so adding a new user only requires `Connect-Dropbox -Account <selector>`. Refresh tokens are never shared across accounts.
+Selects which saved account's credentials to load (Dropbox `accountId`, full email, or unambiguous email local-part). When omitted, the default account is used. When the selector matches no saved account and `-AppKey` is supplied, a fresh OAuth flow runs and the resulting credentials are persisted under the newly-discovered `accountId`. When the selector matches no saved account and `-AppKey` is **not** supplied (and the host is interactive), `Connect-Dropbox` launches an app-registration wizard: it opens the Dropbox app-creation page, prints the values to paste (redirect URI, scopes), and prompts for the resulting AppKey before continuing the OAuth flow. Each account therefore gets its own Dropbox app + refresh token, which is required while the app is in Development status. Refresh tokens are never shared across accounts.
 
 ```yaml
 Type: String

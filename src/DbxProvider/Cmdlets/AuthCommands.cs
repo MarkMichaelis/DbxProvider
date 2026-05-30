@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 using System.Management.Automation;
 using System.Net;
 using System.Text;
@@ -100,24 +98,22 @@ namespace DbxProvider.Cmdlets
                     appSecret    ??= saved?.Account.AppSecret;
                     refreshToken ??= saved?.Account.RefreshToken;
 
-                    // When the caller asked for a specific account that isn't saved
-                    // yet, the same Dropbox app can still authenticate the new user.
-                    // Reuse the AppKey (and AppSecret) from any already-saved account
-                    // so the user doesn't have to re-paste -AppKey for every new
-                    // account. We deliberately do NOT copy a RefreshToken — that
-                    // belongs to another user.
+                    // No matching saved account and no -AppKey on the command line
+                    // means this is a brand-new setup (or a new account on a Dropbox
+                    // app still in Development mode, where each Dropbox user needs
+                    // their own app). Walk the user through registering a Dropbox
+                    // app: open the create-app page, show the values to paste, and
+                    // prompt for the resulting AppKey so they only have to click
+                    // through the browser steps.
                     if (saved == null
                         && string.IsNullOrEmpty(appKey)
                         && !MyInvocation.BoundParameters.ContainsKey(nameof(AppKey)))
                     {
-                        var fallback = PickFallbackApp(CredentialStore.ListAccounts());
-                        if (fallback != null)
+                        var registered = PromptForNewAppRegistration(RedirectPort);
+                        if (registered != null)
                         {
-                            appKey    = fallback.Value.AppKey;
-                            appSecret = fallback.Value.AppSecret;
-                            WriteVerbose(
-                                $"Reusing AppKey from saved account '{fallback.Value.SourceLabel}' " +
-                                $"to authenticate '{Account}'.");
+                            appKey    = registered.Value.AppKey;
+                            appSecret = registered.Value.AppSecret;
                         }
                     }
 
@@ -144,6 +140,8 @@ namespace DbxProvider.Cmdlets
                     }
                     else
                     {
+                        // PromptForNewAppRegistration was non-interactive or returned null:
+                        // emit the clear actionable message.
                         WriteRegistrationHelp(RedirectPort);
                         throw new InvalidOperationException(
                             "No credentials available. Provide -AccessToken, or -AppKey (with optional -AppSecret), " +
@@ -380,42 +378,123 @@ namespace DbxProvider.Cmdlets
         }
 
         /// <summary>
-        /// Picks an AppKey/AppSecret to reuse for a brand-new account that
-        /// isn't yet saved. Selection order: the default account first, then
-        /// the first listed account that has an AppKey. Returns <c>null</c> if
-        /// no saved account has an AppKey.
+        /// Walks a brand-new user through registering a Dropbox app: prints the
+        /// values they need to paste, opens the create-app page in their default
+        /// browser, then prompts for the resulting AppKey (and optional
+        /// AppSecret). Returns <c>null</c> when the host is non-interactive
+        /// (callers fall back to a clear error message in that case).
         ///
         /// <para>
-        /// Deliberately exposes only AppKey/AppSecret (the app identity), not
-        /// RefreshToken (the user identity). Reusing a refresh token across
-        /// accounts would authenticate the wrong user.
+        /// This is the default first-run UX. Sharing one Dropbox app's AppKey
+        /// across multiple accounts only works once the app is in Production
+        /// status; while it is still in Development, every Dropbox user that
+        /// is not the app owner needs their own app, which is exactly what
+        /// this wizard automates.
         /// </para>
         /// </summary>
-        internal static FallbackApp? PickFallbackApp(IReadOnlyList<StoredAccountEntry> accounts)
+        private NewAppRegistration? PromptForNewAppRegistration(int port)
         {
-            if (accounts == null || accounts.Count == 0) return null;
+            if (!IsInteractiveHost())
+            {
+                return null;
+            }
 
-            var preferred = accounts.FirstOrDefault(a => a.IsDefault && !string.IsNullOrEmpty(a.Account.AppKey))
-                            ?? accounts.FirstOrDefault(a => !string.IsNullOrEmpty(a.Account.AppKey));
-            if (preferred == null) return null;
+            var redirectUri = $"http://localhost:{port}/";
+            var createUrl = "https://www.dropbox.com/developers/apps/create";
 
-            return new FallbackApp(
-                preferred.Account.AppKey!,
-                preferred.Account.AppSecret,
-                preferred.Account.Email ?? preferred.Key);
+            Host.UI.WriteLine();
+            Host.UI.WriteLine("No saved Dropbox credentials match this request.");
+            Host.UI.WriteLine("Let's register a Dropbox app for this account. The browser will open the");
+            Host.UI.WriteLine("Dropbox app-creation page; copy the values below into the form, then come back");
+            Host.UI.WriteLine("here and paste the AppKey.");
+            Host.UI.WriteLine();
+            Host.UI.WriteLine("--- Paste these values in the Dropbox App Console ---");
+            Host.UI.WriteLine("  1. API:           Scoped access");
+            Host.UI.WriteLine("  2. Access type:   Full Dropbox  (or App folder, your choice)");
+            Host.UI.WriteLine("  3. App name:      anything unique (e.g. dbxprovider-<your-initials>)");
+            Host.UI.WriteLine($"  4. Redirect URI:  {redirectUri}");
+            Host.UI.WriteLine("                    (Settings tab -> OAuth 2 -> Redirect URIs -> Add)");
+            Host.UI.WriteLine("  5. Scopes:        files.metadata.read   files.metadata.write");
+            Host.UI.WriteLine("                    files.content.read    files.content.write");
+            Host.UI.WriteLine("                    sharing.read          sharing.write");
+            Host.UI.WriteLine("                    account_info.read");
+            Host.UI.WriteLine("                    (Permissions tab -> check boxes -> Submit)");
+            Host.UI.WriteLine("  6. Copy the App key from the Settings tab and paste it below.");
+            Host.UI.WriteLine("------------------------------------------------------");
+            Host.UI.WriteLine();
+            Host.UI.WriteLine($"Opening {TerminalHyperlink.Format(createUrl)} ...");
+            Host.UI.WriteLine("(If the browser does not open, copy the link above.)");
+
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo(createUrl) { UseShellExecute = true };
+                System.Diagnostics.Process.Start(psi);
+            }
+            catch
+            {
+                // Browser launch is best-effort.
+            }
+
+            Host.UI.WriteLine();
+            Host.UI.Write("Paste the App key here: ");
+            string? typedKey;
+            while (true)
+            {
+                typedKey = Host.UI.ReadLine()?.Trim();
+                if (typedKey == null)
+                {
+                    return null; // host closed input
+                }
+                if (typedKey.Length == 0)
+                {
+                    throw new OperationCanceledException("App registration cancelled (no AppKey provided).");
+                }
+                // Dropbox app keys are 15 alphanumeric characters; accept anything
+                // 10+ chars to be forgiving of future format changes but reject
+                // obvious paste mistakes (URLs, whitespace).
+                if (typedKey.Length >= 10 && !typedKey.Contains(' ') && !typedKey.Contains('/'))
+                {
+                    break;
+                }
+                Host.UI.WriteLine("That doesn't look like an App key. Paste the value from the Settings tab (it's a short alphanumeric string).");
+                Host.UI.Write("App key: ");
+            }
+
+            Host.UI.Write("App secret (press Enter to skip; only required for confidential apps): ");
+            var typedSecret = Host.UI.ReadLine()?.Trim();
+            if (string.IsNullOrEmpty(typedSecret))
+            {
+                typedSecret = null;
+            }
+
+            return new NewAppRegistration(typedKey!, typedSecret);
         }
 
-        internal readonly struct FallbackApp
+        private bool IsInteractiveHost()
         {
-            public FallbackApp(string appKey, string? appSecret, string sourceLabel)
+            try
+            {
+                // Host.UI.ReadLine throws on hosts without an interactive console
+                // (e.g. when stdin is redirected). RawUI.KeyAvailable being
+                // unsupported is a reliable proxy for "no terminal".
+                _ = Host.UI.RawUI.KeyAvailable;
+                return !Console.IsInputRedirected;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private readonly struct NewAppRegistration
+        {
+            public NewAppRegistration(string appKey, string? appSecret)
             {
                 AppKey = appKey;
                 AppSecret = appSecret;
-                SourceLabel = sourceLabel;
             }
             public string AppKey { get; }
             public string? AppSecret { get; }
-            public string SourceLabel { get; }
         }
 
         /// <summary>
