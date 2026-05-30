@@ -10,7 +10,7 @@ namespace DbxProvider.Models
         public string Path { get; set; } = string.Empty;
         public string Id { get; set; } = string.Empty;
         public bool IsFolder { get; set; }
-        public ulong Size { get; set; }
+        public ulong Length { get; set; }
         public DateTime? ServerModified { get; set; }
         public DateTime? ClientModified { get; set; }
         public string Rev { get; set; } = string.Empty;
@@ -24,7 +24,7 @@ namespace DbxProvider.Models
         public bool IsDownloadable { get; set; } = true;
 
         public string ItemType => IsFolder ? "Folder" : "File";
-        public string DisplaySize => IsFolder ? "" : FormatSize(Size);
+        public string DisplaySize => IsFolder ? "" : FormatSize(Length);
 
         private static string FormatSize(ulong bytes)
         {
@@ -43,7 +43,7 @@ namespace DbxProvider.Models
         public string Name { get; set; } = string.Empty;
         public string Path { get; set; } = string.Empty;
         public string Rev { get; set; } = string.Empty;
-        public ulong Size { get; set; }
+        public ulong Length { get; set; }
         public DateTime? ServerModified { get; set; }
         public DateTime? ClientModified { get; set; }
         public string ContentHash { get; set; } = string.Empty;

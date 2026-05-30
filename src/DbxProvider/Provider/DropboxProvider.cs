@@ -635,7 +635,7 @@ namespace DbxProvider.Provider
                     ("Path", item.Path),
                     ("Id", item.Id),
                     ("IsFolder", item.IsFolder),
-                    ("Size", item.Size),
+                    ("Length", item.Length),
                     ("ServerModified", item.ServerModified),
                     ("ClientModified", item.ClientModified),
                     ("Rev", item.Rev),

@@ -92,7 +92,7 @@
           <TableRowEntry>
             <TableColumnItems>
               <TableColumnItem><PropertyName>Rev</PropertyName></TableColumnItem>
-              <TableColumnItem><PropertyName>Size</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Length</PropertyName></TableColumnItem>
               <TableColumnItem>
                 <ScriptBlock>if ($_.ServerModified) { $_.ServerModified.ToString("yyyy-MM-dd HH:mm:ss") } else { "" }</ScriptBlock>
               </TableColumnItem>

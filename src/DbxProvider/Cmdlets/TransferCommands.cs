@@ -103,7 +103,7 @@ namespace DbxProvider.Cmdlets
                 var item = Run(ct => service.UploadAsync(DropboxPath, stream, mode, cancellationToken: ct));
                 WriteObject(item);
 
-                WriteVerbose($"Uploaded {resolvedSource} to {item.Path} ({item.Size:N0} bytes)");
+                WriteVerbose($"Uploaded {resolvedSource} to {item.Path} ({item.Length:N0} bytes)");
             }
             catch (Exception ex) when (ex is not PipelineStoppedException)
             {

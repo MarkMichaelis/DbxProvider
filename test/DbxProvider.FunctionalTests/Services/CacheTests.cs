@@ -328,7 +328,7 @@ public class CacheTests : IDisposable
                 Name = "local-add.txt",
                 Path = $"{folder}/local-add.txt",
                 IsFolder = false,
-                Size = 5
+                Length = 5
             };
             cache.ApplyLocalAdd(item);
 

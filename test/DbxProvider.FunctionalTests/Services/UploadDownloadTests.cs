@@ -60,7 +60,7 @@ public class UploadDownloadTests
                     await svc.UploadAsync(path, src);
 
                 var meta = await svc.GetMetadataAsync(path);
-                Assert.Equal((ulong)size, meta.Size);
+                Assert.Equal((ulong)size, meta.Length);
             }
             finally
             {
@@ -100,7 +100,7 @@ public class UploadDownloadTests
                 await svc.UploadAsync(path, src);
 
             var meta = await svc.GetMetadataAsync(path);
-            Assert.Equal((ulong)size, meta.Size);
+            Assert.Equal((ulong)size, meta.Length);
         }
         finally
         {
