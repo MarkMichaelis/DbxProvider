@@ -73,14 +73,22 @@ Allow"**.
 ## Evidence Plan
 
 - **Change type:** CLI (interactive cmdlet UX change).
-- **Artifact format:** markdown index + recording (asciinema or screen recording) showing a fresh `Connect-Dropbox` first-run that:
-  1. Opens the user's default browser.
-  2. Pre-fills the Create-app form.
-  3. Captures the user clicking Create app.
-  4. Shows the redirect URI + scope checkboxes filled automatically.
-  5. Shows the App key arriving in the cmdlet output and `Get-ChildItem Dbx:\` succeeding.
-- **Capture command:** `pwsh -NoProfile -File .\build\Capture-ConnectDropboxEvidence.ps1` (new helper that records terminal + browser via the `evidence-capture` skill conventions and writes the recording + a scrubbed transcript).
-- **Entry-point file:** `.evidence/<phase-id>/evidence.md` (markdown index linking to the recording and the auto-generated wizard transcript).
+- **Artifact format:** Markdown transcript per the `evidence-capture` skill's
+  `cli-evidence.md.tmpl` (the skill's templates already cover this change
+  type; no per-feature recording helper is needed or planned).
+- **Capture command:**
+
+  ```pwsh
+  pwsh -NoProfile -File .github/skills/evidence-capture/helpers/Publish-Evidence.ps1 `
+    -ChangeType cli `
+    -Command "Connect-Dropbox -Account demo@example.com -Verbose" `
+    -PullRequest 5 -LocalOnly
+  ```
+
+  (Resolves once `chore/sdlc-sync` merges to `main`; Phase 5b is deferred
+  until then as an SDLC infrastructure dependency, not a feature
+  deliverable.)
+- **Entry-point file:** `.evidence/<phase-id>/evidence.md`.
 
 ## Acceptance Criteria
 
@@ -104,7 +112,6 @@ Allow"**.
 - [ ] **Test:** existing `Connect-Dropbox` non-interactive-host test still returns the prior `InvalidOperationException` (regression).
 - [ ] **Dep:** add `Microsoft.Playwright` package reference; verify `dotnet build` clean.
 - [ ] **Docs:** update `README.md` Multiple Accounts section + `docs\help\en-US\Connect-Dropbox.md` Reuse-mode bullet to describe the new wizard, the persistent profile, and the manual fallback. No new flag to document.
-- [ ] **Evidence:** add `build\Capture-ConnectDropboxEvidence.ps1` recording helper; produce `.evidence/<phase-id>/evidence.md` per the Evidence Plan.
 
 ## Risks / Mitigations
 
@@ -144,4 +151,3 @@ on `main`. Two paths:
 1. Approve this as the design, or revise?
 2. Coordination path (A) wait-for-sdlc-sync vs. (B) land-on-main-now?
 3. Mac/Linux default-browser detection: defer to a follow-up issue, or include in this issue?
-4. Evidence recording tool: asciinema (terminal only, lightweight) vs. full-screen recording (captures the browser)?
