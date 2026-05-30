@@ -400,6 +400,55 @@ namespace DbxProvider.Cmdlets
             }
 
             var redirectUri = $"http://localhost:{port}/";
+            var scopes = new[]
+            {
+                "files.metadata.read", "files.metadata.write",
+                "files.content.read",  "files.content.write",
+                "sharing.read",        "sharing.write",
+                "account_info.read",
+            };
+
+            // ---- Try the Playwright-driven auto-registrar first. ----
+            var browser = DefaultBrowser.Detect();
+            if (browser.IsChromiumFamily && !string.IsNullOrEmpty(browser.ExecutablePath))
+            {
+                Host.UI.WriteLine();
+                Host.UI.WriteLine($"Detected default browser: {browser.FriendlyName}.");
+                Host.UI.WriteLine("Pre-filling the Dropbox app-creation form for you. Sign in if prompted,");
+                Host.UI.WriteLine("review the pre-filled fields, then click 'Create app' in the browser.");
+                Host.UI.WriteLine("(If anything goes wrong we'll fall back to a manual wizard.)");
+                Host.UI.WriteLine();
+
+                try
+                {
+                    var registrar = new DropboxAppRegistrar(
+                        browser.ExecutablePath!,
+                        msg => Host.UI.WriteLine(msg));
+                    var result = registrar
+                        .RegisterAsync(redirectUri, scopes, System.Threading.CancellationToken.None)
+                        .GetAwaiter().GetResult();
+                    if (result is not null)
+                    {
+                        Host.UI.WriteLine($"App '{result.AppName}' registered. App key captured.");
+                        return new NewAppRegistration(result.AppKey, result.AppSecret);
+                    }
+                    Host.UI.WriteLine("Auto-registration did not complete. Falling back to manual wizard.");
+                }
+                catch (Exception ex)
+                {
+                    WriteVerbose($"Auto-registrar threw: {ex.Message}. Falling back to manual wizard.");
+                }
+            }
+            else
+            {
+                WriteVerbose($"Default browser is '{browser.FriendlyName}' (not Chromium-family); using manual wizard.");
+            }
+
+            return PromptForNewAppRegistrationManual(port, redirectUri);
+        }
+
+        private NewAppRegistration? PromptForNewAppRegistrationManual(int port, string redirectUri)
+        {
             var createUrl = "https://www.dropbox.com/developers/apps/create";
 
             Host.UI.WriteLine();

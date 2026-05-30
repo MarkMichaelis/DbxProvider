@@ -41,8 +41,14 @@ Three usage modes are supported:
 - **Reuse mode**: `Connect-Dropbox` with no parameters reuses
   credentials previously saved by `Set-DropboxCredential` or by an
   earlier OAuth connect. If nothing is saved (or `-Account` selects a
-  not-yet-registered user), an interactive wizard opens the Dropbox
-  app-creation page and prompts for the new AppKey.
+  not-yet-registered user), an interactive wizard registers a fresh
+  Dropbox app for that user. When the default browser is Chromium-family
+  (Edge, Chrome, Brave, Vivaldi, Opera, Arc) the wizard drives the App
+  Console form via Playwright: it pre-fills name/access type, waits for
+  the user to click *Create app*, then automatically configures the
+  redirect URI and scopes and reads the App key back. On Firefox/Safari
+  or whenever the auto-flow fails, it falls back to printing the values
+  to paste manually.
 
 Unless `-NoSave` is specified, the AppKey / AppSecret / RefreshToken
 are persisted via the platform's credential store
@@ -102,7 +108,7 @@ Accept wildcard characters: False
 ```
 
 ### -Account
-Selects which saved account's credentials to load (Dropbox `accountId`, full email, or unambiguous email local-part). When omitted, the default account is used. When the selector matches no saved account and `-AppKey` is supplied, a fresh OAuth flow runs and the resulting credentials are persisted under the newly-discovered `accountId`. When the selector matches no saved account and `-AppKey` is **not** supplied (and the host is interactive), `Connect-Dropbox` launches an app-registration wizard: it opens the Dropbox app-creation page, prints the values to paste (redirect URI, scopes), and prompts for the resulting AppKey before continuing the OAuth flow. Each account therefore gets its own Dropbox app + refresh token, which is required while the app is in Development status. Refresh tokens are never shared across accounts.
+Selects which saved account's credentials to load (Dropbox `accountId`, full email, or unambiguous email local-part). When omitted, the default account is used. When the selector matches no saved account and `-AppKey` is supplied, a fresh OAuth flow runs and the resulting credentials are persisted under the newly-discovered `accountId`. When the selector matches no saved account and `-AppKey` is **not** supplied (and the host is interactive), `Connect-Dropbox` launches an app-registration wizard. With a Chromium-family default browser (Edge, Chrome, Brave, Vivaldi, Opera, Arc) the wizard uses Playwright to pre-fill the Dropbox create-app form and — once the user clicks *Create app* — to automatically add the redirect URI, tick the seven required scopes, and read back the App key with no manual copy-paste. Otherwise it falls back to printing the values to paste manually. Each account therefore gets its own Dropbox app + refresh token, which is required while the app is in Development status. Refresh tokens are never shared across accounts.
 
 ```yaml
 Type: String

@@ -241,14 +241,23 @@ Get-ChildItem work:\
 
 The interactive registration wizard runs whenever `Connect-Dropbox` cannot
 find a saved credential for the requested account and `-AppKey` was not
-supplied. It opens the Dropbox app-creation page, displays the redirect URI
-and required scopes, and prompts you to paste the resulting AppKey. Each
-Dropbox user gets their own app + refresh token; refresh tokens are never
-shared across accounts. Once your app is approved for **Production** status
-in the Dropbox App Console you can re-use a single AppKey for many users
-(just pass `-AppKey` explicitly), but while the app is in **Development**
-mode only the app owner's Dropbox account can authorize it, which is why
-the wizard registers a fresh app per user by default.
+supplied. When your default browser is a Chromium-family browser
+(Edge, Chrome, Brave, Vivaldi, Opera, Arc), the wizard launches that browser
+via Playwright, **pre-fills** the create-app form with a unique
+`PSDbxProvider-<8 random>` name, waits for you to click *Create app*, then
+**automatically** adds the redirect URI, ticks the seven required scopes,
+clicks *Submit*, and reads the resulting App key back into the cmdlet — no
+copy-paste required. Playwright drives a dedicated profile under
+`%LOCALAPPDATA%\DbxProvider\playwright-profile` and never touches your
+regular browser profile. On Firefox/Safari/unknown defaults — or whenever
+the auto-flow fails (a trace is saved to `%TEMP%\dbxprovider-trace-*.zip`)
+— the cmdlet falls back to the original purely-textual wizard. Each Dropbox
+user gets their own app + refresh token; refresh tokens are never shared
+across accounts. Once your app is approved for **Production** status in the
+Dropbox App Console you can re-use a single AppKey for many users (just
+pass `-AppKey` explicitly), but while the app is in **Development** mode
+only the app owner's Dropbox account can authorize it, which is why the
+wizard registers a fresh app per user by default.
 
 Manage saved accounts:
 
