@@ -26,6 +26,35 @@ namespace DbxProvider.Models
         public string ItemType => IsFolder ? "Folder" : "File";
         public string DisplaySize => IsFolder ? "" : FormatSize(Length);
 
+        /// <summary>FileSystem-parity alias for <see cref="Path"/>.</summary>
+        public string FullName => Path;
+
+        /// <summary>FileSystem-parity alias for <see cref="ServerModified"/>.</summary>
+        public DateTime? LastWriteTime => ServerModified;
+
+        /// <summary>FileSystem-parity: file extension including the leading dot, or empty string.</summary>
+        public string Extension
+        {
+            get
+            {
+                if (IsFolder || string.IsNullOrEmpty(Name)) return string.Empty;
+                var dot = Name.LastIndexOf('.');
+                return dot > 0 ? Name.Substring(dot) : string.Empty;
+            }
+        }
+
+        /// <summary>FileSystem-parity: file name without extension.</summary>
+        public string BaseName
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(Name)) return string.Empty;
+                if (IsFolder) return Name;
+                var dot = Name.LastIndexOf('.');
+                return dot > 0 ? Name.Substring(0, dot) : Name;
+            }
+        }
+
         private static string FormatSize(ulong bytes)
         {
             string[] suffixes = { "B", "KB", "MB", "GB", "TB" };

@@ -284,6 +284,15 @@ case.
 | `Clear-Content`       | upload (empty)            | Clear file content           |
 | `Get-ItemProperty`    | get_metadata              | Get detailed metadata        |
 
+> **FileSystem parity:** Items returned from `Dbx:\` expose `Length`,
+> `FullName`, `LastWriteTime`, `Extension`, and `BaseName` so most
+> FileSystem-style pipelines (`Where-Object Length -eq 0`,
+> `Sort-Object LastWriteTime`) work unchanged. `Get-ChildItem` also
+> supports `-File`, `-Directory`, and `-Filter` (recursive `-Filter`
+> uses Dropbox's server-side `search_v2`). See
+> [docs/FILESYSTEM-PARITY.md](docs/FILESYSTEM-PARITY.md) for the full
+> policy on where we mirror FileSystem and where we deliberately don't.
+
 ## Custom Cmdlets
 
 ### Authentication
