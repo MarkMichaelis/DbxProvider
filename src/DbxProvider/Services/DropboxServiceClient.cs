@@ -477,7 +477,7 @@ namespace DbxProvider.Services
             return result.Entries.Select(e => new DropboxRevision
             {
                 Name = e.Name, Path = e.PathDisplay ?? e.PathLower ?? "",
-                Rev = e.Rev, Size = e.Size,
+                Rev = e.Rev, Length = e.Size,
                 ServerModified = e.ServerModified, ClientModified = e.ClientModified,
                 ContentHash = e.ContentHash ?? "", IsDeleted = result.IsDeleted
             }).ToList();
@@ -562,7 +562,7 @@ namespace DbxProvider.Services
             return (bytes, new DropboxItem
             {
                 Name = result.Response.FileMetadata?.Name ?? "",
-                Size = result.Response.FileMetadata?.Size ?? 0,
+                Length = result.Response.FileMetadata?.Size ?? 0,
                 Path = result.Response.FileMetadata?.PathDisplay ?? ""
             });
         }
@@ -948,7 +948,7 @@ namespace DbxProvider.Services
             if (metadata.IsFile && metadata.AsFile is FileMetadata file)
             {
                 item.Id = file.Id ?? "";
-                item.Size = file.Size;
+                item.Length = file.Size;
                 item.ServerModified = file.ServerModified;
                 item.ClientModified = file.ClientModified;
                 item.Rev = file.Rev ?? "";
