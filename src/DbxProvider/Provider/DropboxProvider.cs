@@ -356,7 +356,14 @@ namespace DbxProvider.Provider
             try
             {
                 var service = GetService();
-                var noSearch = GetNoSearchParams()?.NoSearch.IsPresent == true;
+                var dynParams = GetNoSearchParams();
+                var noSearch = dynParams?.NoSearch.IsPresent == true;
+                var fileOnly = dynParams?.File.IsPresent == true;
+                var dirOnly = dynParams?.Directory.IsPresent == true;
+                if (fileOnly && dirOnly) { fileOnly = dirOnly = false; }
+
+                bool ItemKindMatches(Models.DropboxItem item) =>
+                    (!fileOnly || !item.IsFolder) && (!dirOnly || item.IsFolder);
 
                 // Route to search_v2 when scope is a subtree AND a wildcard/filter
                 // is present. Single-folder wildcards (e.g. `dir *.dbx`) keep the
@@ -374,7 +381,7 @@ namespace DbxProvider.Provider
                         WriteVerbose($"Get-ChildItem: routing to search_v2 (scope='{searchScope}', pattern='{pattern}')");
                         var found = service.SearchByFilenameAsync(pattern, searchScope, 1000)
                             .GetAwaiter().GetResult();
-                        foreach (var item in found.OrderBy(i => !i.IsFolder).ThenBy(i => i.Name))
+                        foreach (var item in found.Where(ItemKindMatches).OrderBy(i => !i.IsFolder).ThenBy(i => i.Name))
                         {
                             var providerPath = item.Path.Replace('/', '\\').TrimStart('\\');
                             WriteItemObject(item, providerPath, item.IsFolder);
@@ -394,7 +401,7 @@ namespace DbxProvider.Provider
                 var items = (cache != null && !recurse)
                     ? cache.GetChildren(path)
                     : Run(ct => service.ListFolderAsync(path, recursive: recurse, cancellationToken: ct));
-                foreach (var item in items.OrderBy(i => !i.IsFolder).ThenBy(i => i.Name))
+                foreach (var item in items.Where(ItemKindMatches).OrderBy(i => !i.IsFolder).ThenBy(i => i.Name))
                 {
                     var providerPath = item.Path.Replace('/', '\\').TrimStart('\\');
                     WriteItemObject(item, providerPath, item.IsFolder);
@@ -710,13 +717,22 @@ namespace DbxProvider.Provider
     }
 
     /// <summary>
-    /// Dynamic parameter exposed by Get-ChildItem and Test-Path on the Dropbox
-    /// provider. Use -NoSearch to force the list-based path (skipping
-    /// search_v2). Useful right after uploads while the search index lags.
+    /// Dynamic parameters exposed by Get-ChildItem (and Test-Path) on the
+    /// Dropbox provider.
+    ///   -NoSearch  : force the list-based path (skip search_v2). Useful
+    ///                right after uploads while the search index lags.
+    ///   -File      : return only files (FileSystem-parity post-filter).
+    ///   -Directory : return only folders (FileSystem-parity post-filter).
     /// </summary>
     public class NoSearchDynamicParameters
     {
         [Parameter]
         public SwitchParameter NoSearch { get; set; }
+
+        [Parameter]
+        public SwitchParameter File { get; set; }
+
+        [Parameter]
+        public SwitchParameter Directory { get; set; }
     }
 }
