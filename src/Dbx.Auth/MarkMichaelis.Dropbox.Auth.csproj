@@ -34,6 +34,7 @@
   <!-- netstandard2.0 lacks nullable attributes and some BCL APIs; provide polyfills only where needed. -->
   <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
+    <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
   </ItemGroup>
 
 </Project>

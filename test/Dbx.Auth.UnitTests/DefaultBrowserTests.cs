@@ -1,7 +1,7 @@
-using DbxProvider.Services;
+using MarkMichaelis.Dropbox.Auth;
 using Xunit;
 
-namespace DbxProvider.UnitTests;
+namespace Dbx.Auth.UnitTests;
 
 /// <summary>
 /// Tests for <see cref="DefaultBrowser.Map"/>, the pure registry-string-to-browser
