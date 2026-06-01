@@ -422,18 +422,26 @@ namespace DbxProvider.Cmdlets
 
                 try
                 {
-                    var registrar = new DropboxAppRegistrar(
-                        browser.ExecutablePath!,
-                        msg => Host.UI.WriteLine(msg));
-                    var result = registrar
-                        .RegisterAsync(redirectUri, scopes, System.Threading.CancellationToken.None)
-                        .GetAwaiter().GetResult();
-                    if (result is not null)
+                    var launcher = new PlaywrightBrowserLauncher(browser.ExecutablePath!);
+                    try
                     {
-                        Host.UI.WriteLine($"App '{result.AppName}' registered. App key captured.");
-                        return new NewAppRegistration(result.AppKey, result.AppSecret);
+                        var registrar = new DropboxAppRegistrar(
+                            launcher,
+                            new CmdletConsole(Host.UI));
+                        var result = registrar
+                            .RegisterAsync(redirectUri, scopes, System.Threading.CancellationToken.None)
+                            .GetAwaiter().GetResult();
+                        if (result is not null)
+                        {
+                            Host.UI.WriteLine($"App '{result.AppName}' registered. App key captured.");
+                            return new NewAppRegistration(result.AppKey, result.AppSecret);
+                        }
+                        Host.UI.WriteLine("Auto-registration did not complete. Falling back to manual wizard.");
                     }
-                    Host.UI.WriteLine("Auto-registration did not complete. Falling back to manual wizard.");
+                    finally
+                    {
+                        launcher.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                    }
                 }
                 catch (Exception ex)
                 {
