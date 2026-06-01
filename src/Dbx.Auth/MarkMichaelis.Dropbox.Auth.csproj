@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>MarkMichaelis.Dropbox.Auth</RootNamespace>
+    <AssemblyName>MarkMichaelis.Dropbox.Auth</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <!-- NuGet packaging metadata -->
+  <PropertyGroup>
+    <PackageId>MarkMichaelis.Dropbox.Auth</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>MarkMichaelis</Authors>
+    <Description>Reusable Dropbox OAuth onboarding: loopback PKCE flow, default-browser detection, and Playwright-driven app registration. Extracted from DbxProvider.</Description>
+    <RepositoryUrl>https://github.com/MarkMichaelis/DbxProvider</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>dropbox;oauth;pkce;authentication;playwright</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Dbx.Auth.UnitTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Dropbox.Api" Version="7.0.0" />
+    <PackageReference Include="Microsoft.Playwright" Version="1.59.0" />
+  </ItemGroup>
+
+  <!-- netstandard2.0 lacks nullable attributes and some BCL APIs; provide polyfills only where needed. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+</Project>
