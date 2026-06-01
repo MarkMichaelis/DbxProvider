@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
-using DbxProvider.Services;
+using MarkMichaelis.Dropbox.Auth;
 using Xunit;
 
-namespace DbxProvider.UnitTests;
+namespace Dbx.Auth.UnitTests;
 
 /// <summary>
 /// Tests for <see cref="DropboxAppRegistrar.GenerateAppName"/>.
