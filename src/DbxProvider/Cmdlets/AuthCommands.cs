@@ -6,6 +6,7 @@ using System.Text;
 using Dropbox.Api;
 using DbxProvider.Provider;
 using DbxProvider.Services;
+using MarkMichaelis.Dropbox.Auth;
 
 namespace DbxProvider.Cmdlets
 {
