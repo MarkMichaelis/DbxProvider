@@ -12,6 +12,7 @@ namespace DbxProvider.UnitTests;
 /// LOCALAPPDATA to a temp directory so it can never touch a developer's
 /// real credentials file.
 /// </summary>
+[Collection("CredentialStore")]
 public class CredentialStoreMultiAccountTests : IDisposable
 {
     private readonly string _origLocalAppData;
