@@ -1,9 +1,7 @@
 using System;
 using System.Globalization;
 using System.Management.Automation;
-using System.Net;
 using System.Text;
-using Dropbox.Api;
 using DbxProvider.Provider;
 using DbxProvider.Services;
 using MarkMichaelis.Dropbox.Auth;
@@ -222,127 +220,36 @@ namespace DbxProvider.Cmdlets
 
         private (string AccessToken, string? RefreshToken) RunOAuthFlow(string appKey, string? appSecret, int port)
         {
-            var redirectUri = $"http://localhost:{port.ToString(CultureInfo.InvariantCulture)}/";
-            var state = Guid.NewGuid().ToString("N");
-
-            var codeVerifier = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
-            using var sha256 = System.Security.Cryptography.SHA256.Create();
-            var challengeBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(codeVerifier));
-            var codeChallenge = Convert.ToBase64String(challengeBytes)
-                .TrimEnd('=').Replace('+', '-').Replace('/', '_');
-
-            var authorizeUri = new Uri(
-                $"https://www.dropbox.com/oauth2/authorize" +
-                $"?client_id={Uri.EscapeDataString(appKey)}" +
-                $"&response_type=code" +
-                $"&redirect_uri={Uri.EscapeDataString(redirectUri)}" +
-                $"&state={state}" +
-                $"&code_challenge={codeChallenge}" +
-                $"&code_challenge_method=S256" +
-                $"&token_access_type=offline");
-
             WriteRegistrationHelp(port);
-            Host.UI.WriteLine("Opening browser for Dropbox authorization...");
-            Host.UI.WriteLine($"If browser doesn't open, visit: {TerminalHyperlink.Format(authorizeUri.ToString())}");
 
-            try
+            // Cancel the loopback flow when the pipeline stops (Ctrl+C) or the
+            // user presses Esc, preserving the prior cancellation behaviour.
+            using var cts = new System.Threading.CancellationTokenSource();
+            var monitor = System.Threading.Tasks.Task.Run(() =>
             {
-                var psi = new System.Diagnostics.ProcessStartInfo(authorizeUri.ToString())
-                { UseShellExecute = true };
-                System.Diagnostics.Process.Start(psi);
-            }
-            catch
-            {
-                // Browser may not open in some environments; user can copy the URL.
-            }
-
-            using var listener = new HttpListener();
-            try
-            {
-                listener.Prefixes.Add(redirectUri);
-                listener.Start();
-            }
-            catch (HttpListenerException ex)
-            {
-                throw new InvalidOperationException(
-                    $"Failed to bind OAuth callback listener on {redirectUri}. " +
-                    $"Choose a different port via -RedirectPort and register http://localhost:<port>/ " +
-                    $"in your Dropbox app's redirect URIs. Underlying error: {ex.Message}", ex);
-            }
-
-            Host.UI.WriteLine($"Waiting for authorization on {redirectUri} ...");
-            Host.UI.WriteLine("(Press Esc or Ctrl+C to cancel.)");
-
-            string? code = null;
-            string? returnedState = null;
-            string? errorParam = null;
-
-            // Browsers may probe the listener (favicon, preconnect, HSTS) before delivering the
-            // OAuth redirect. Skip such requests until we see one carrying ?code= or ?error=.
-            while (true)
-            {
-                var contextTask = listener.GetContextAsync();
-                while (!contextTask.IsCompleted)
+                while (!cts.IsCancellationRequested)
                 {
-                    if (Stopping)
+                    if (Stopping || TryConsumeEscape())
                     {
-                        listener.Stop();
-                        throw new OperationCanceledException("OAuth flow cancelled by user (Ctrl+C).");
-                    }
-                    if (TryConsumeEscape())
-                    {
-                        listener.Stop();
-                        throw new OperationCanceledException("OAuth flow cancelled by user (Esc).");
-                    }
-                    if (contextTask.Wait(TimeSpan.FromMilliseconds(150)))
+                        cts.Cancel();
                         break;
+                    }
+                    System.Threading.Thread.Sleep(150);
                 }
+            });
 
-                var context = contextTask.Result;
-                code = context.Request.QueryString["code"];
-                returnedState = context.Request.QueryString["state"];
-                errorParam = context.Request.QueryString["error"];
-
-                var hasOAuthPayload = !string.IsNullOrEmpty(code) || !string.IsNullOrEmpty(errorParam);
-
-                string responseHtml;
-                if (!hasOAuthPayload)
-                {
-                    // 404 the probe so the browser doesn't cache it as our success page.
-                    context.Response.StatusCode = 404;
-                    responseHtml = "<html><body>Waiting for OAuth callback...</body></html>";
-                }
-                else if (!string.IsNullOrEmpty(errorParam))
-                {
-                    responseHtml = $"<html><body><h2>Authorization failed</h2><p>{WebUtility.HtmlEncode(errorParam)}</p></body></html>";
-                }
-                else
-                {
-                    responseHtml = "<html><body><h2>Authorization successful!</h2><p>You can close this window.</p></body></html>";
-                }
-
-                var buffer = Encoding.UTF8.GetBytes(responseHtml);
-                context.Response.ContentLength64 = buffer.Length;
-                context.Response.OutputStream.Write(buffer, 0, buffer.Length);
-                context.Response.Close();
-
-                if (hasOAuthPayload) break;
+            try
+            {
+                var flow = new LoopbackOAuthFlow(new CmdletConsole(Host.UI));
+                var cred = flow.RunAsync(appKey, appSecret, port, cts.Token)
+                    .GetAwaiter().GetResult();
+                return (cred.AccessToken ?? string.Empty, cred.RefreshToken);
             }
-            listener.Stop();
-
-            if (!string.IsNullOrEmpty(errorParam))
-                throw new Exception($"OAuth flow returned error: {errorParam}");
-
-            if (returnedState != state)
-                throw new Exception("OAuth state mismatch. Possible CSRF attack.");
-
-            if (string.IsNullOrEmpty(code))
-                throw new Exception("No authorization code received.");
-
-            var tokenResult = DropboxOAuth2Helper.ProcessCodeFlowAsync(
-                code, appKey, appSecret, redirectUri, null, codeVerifier).GetAwaiter().GetResult();
-
-            return (tokenResult.AccessToken, tokenResult.RefreshToken);
+            finally
+            {
+                cts.Cancel();
+                try { monitor.Wait(TimeSpan.FromSeconds(1)); } catch { /* best-effort */ }
+            }
         }
 
         private static bool TryConsumeEscape()
