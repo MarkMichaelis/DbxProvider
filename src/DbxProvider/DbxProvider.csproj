@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\IntelliTect.Dropbox.Auth\IntelliTect.Dropbox.Auth.csproj" />
+    <ProjectReference Include="..\Dbx.Core\Dbx.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
