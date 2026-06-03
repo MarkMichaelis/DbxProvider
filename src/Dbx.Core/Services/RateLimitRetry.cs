@@ -109,7 +109,7 @@ namespace DbxProvider.Services
 
                 if (string.IsNullOrWhiteSpace(raw)) return;
 
-                var armSpec = raw.Split('#', 2)[0];
+                var armSpec = raw.Split(new[] { '#' }, 2)[0];
                 var parts = armSpec.Split(':');
                 if (int.TryParse(parts[0], out var count) && count > 0)
                 {
@@ -166,7 +166,7 @@ namespace DbxProvider.Services
                 _tag = "too_many_write_operations";
                 if (string.IsNullOrWhiteSpace(raw)) return;
 
-                var armSpec = raw.Split('#', 2)[0];
+                var armSpec = raw.Split(new[] { '#' }, 2)[0];
                 var parts = armSpec.Split(':');
                 if (int.TryParse(parts[0], out var count) && count > 0)
                 {
@@ -222,7 +222,7 @@ namespace DbxProvider.Services
                 _statusCode = 503;
                 if (string.IsNullOrWhiteSpace(raw)) return;
 
-                var armSpec = raw.Split('#', 2)[0];
+                var armSpec = raw.Split(new[] { '#' }, 2)[0];
                 var parts = armSpec.Split(':');
                 if (int.TryParse(parts[0], out var count) && count > 0)
                 {
