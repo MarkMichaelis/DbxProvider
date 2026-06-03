@@ -45,8 +45,12 @@ public class CredentialStoreMultiAccountTests : IDisposable
     {
         CredentialStore.SaveAccount(new StoredAccount
         {
-            AppKey = "k1", AppSecret = "s1", RefreshToken = "rt1",
-            AccountId = "dbid:aaa", Email = "a@example.com", DisplayName = "Alice"
+            AppKey = "k1",
+            AppSecret = "s1",
+            RefreshToken = "rt1",
+            AccountId = "dbid:aaa",
+            Email = "a@example.com",
+            DisplayName = "Alice"
         });
 
         var loaded = CredentialStore.LoadAccount();
@@ -63,13 +67,17 @@ public class CredentialStoreMultiAccountTests : IDisposable
     {
         CredentialStore.SaveAccount(new StoredAccount
         {
-            AppKey = "k1", RefreshToken = "rt1",
-            AccountId = "dbid:aaa", Email = "alice@x.com"
+            AppKey = "k1",
+            RefreshToken = "rt1",
+            AccountId = "dbid:aaa",
+            Email = "alice@x.com"
         });
         CredentialStore.SaveAccount(new StoredAccount
         {
-            AppKey = "k2", RefreshToken = "rt2",
-            AccountId = "dbid:bbb", Email = "bob@x.com"
+            AppKey = "k2",
+            RefreshToken = "rt2",
+            AccountId = "dbid:bbb",
+            Email = "bob@x.com"
         });
 
         var all = CredentialStore.ListAccounts();
@@ -85,11 +93,17 @@ public class CredentialStoreMultiAccountTests : IDisposable
     {
         CredentialStore.SaveAccount(new StoredAccount
         {
-            AccountId = "dbid:aaa", Email = "alice@one.com", AppKey = "k1", RefreshToken = "rt1"
+            AccountId = "dbid:aaa",
+            Email = "alice@one.com",
+            AppKey = "k1",
+            RefreshToken = "rt1"
         });
         CredentialStore.SaveAccount(new StoredAccount
         {
-            AccountId = "dbid:bbb", Email = "bob@two.com", AppKey = "k2", RefreshToken = "rt2"
+            AccountId = "dbid:bbb",
+            Email = "bob@two.com",
+            AppKey = "k2",
+            RefreshToken = "rt2"
         });
 
         Assert.Equal("dbid:aaa", CredentialStore.LoadAccount("dbid:aaa")!.AccountId);
@@ -102,11 +116,13 @@ public class CredentialStoreMultiAccountTests : IDisposable
     {
         CredentialStore.SaveAccount(new StoredAccount
         {
-            AccountId = "dbid:aaa", Email = "mark@one.com"
+            AccountId = "dbid:aaa",
+            Email = "mark@one.com"
         });
         CredentialStore.SaveAccount(new StoredAccount
         {
-            AccountId = "dbid:bbb", Email = "mark@two.com"
+            AccountId = "dbid:bbb",
+            Email = "mark@two.com"
         });
 
         Assert.Throws<InvalidOperationException>(() => CredentialStore.LoadAccount("mark"));
@@ -152,8 +168,12 @@ public class CredentialStoreMultiAccountTests : IDisposable
     {
         CredentialStore.SaveAccount(new StoredAccount
         {
-            AppKey = "k1", AppSecret = "s1", RefreshToken = "rt1",
-            AccountId = "dbid:aaa", Email = "a@x.com", DisplayName = "Alice"
+            AppKey = "k1",
+            AppSecret = "s1",
+            RefreshToken = "rt1",
+            AccountId = "dbid:aaa",
+            Email = "a@x.com",
+            DisplayName = "Alice"
         });
 
         // Only update RefreshToken via legacy-style call (no AccountId).

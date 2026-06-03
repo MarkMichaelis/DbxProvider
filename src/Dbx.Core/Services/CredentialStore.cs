@@ -303,13 +303,13 @@ namespace DbxProvider.Services
 
             var merged = new StoredAccount
             {
-                AppKey       = updates.AppKey       ?? existing?.AppKey,
-                AppSecret    = EncryptIfPlain(updates.AppSecret) ?? existing?.AppSecret,
+                AppKey = updates.AppKey ?? existing?.AppKey,
+                AppSecret = EncryptIfPlain(updates.AppSecret) ?? existing?.AppSecret,
                 RefreshToken = EncryptIfPlain(updates.RefreshToken) ?? existing?.RefreshToken,
-                AccountId    = updates.AccountId    ?? existing?.AccountId,
-                Email        = updates.Email        ?? existing?.Email,
-                DisplayName  = updates.DisplayName  ?? existing?.DisplayName,
-                SavedAt      = DateTimeOffset.UtcNow
+                AccountId = updates.AccountId ?? existing?.AccountId,
+                Email = updates.Email ?? existing?.Email,
+                DisplayName = updates.DisplayName ?? existing?.DisplayName,
+                SavedAt = DateTimeOffset.UtcNow
             };
 
             file.Accounts[targetKey] = merged;
@@ -421,12 +421,12 @@ namespace DbxProvider.Services
             var defaultEntry = ResolveEntry(null, throwOnAmbiguous: false);
             var updates = new StoredAccount
             {
-                AppKey       = appKey,
-                AppSecret    = appSecret,
+                AppKey = appKey,
+                AppSecret = appSecret,
                 RefreshToken = refreshToken,
-                AccountId    = defaultEntry?.Account.AccountId,
-                Email        = defaultEntry?.Account.Email,
-                DisplayName  = defaultEntry?.Account.DisplayName
+                AccountId = defaultEntry?.Account.AccountId,
+                Email = defaultEntry?.Account.Email,
+                DisplayName = defaultEntry?.Account.DisplayName
             };
             SaveAccount(updates, setDefault: false);
         }
@@ -478,13 +478,13 @@ namespace DbxProvider.Services
                 };
                 migrated.Accounts[CredentialStoreConstants.PreAuthKey] = new StoredAccount
                 {
-                    AppKey       = legacy.AppKey,
-                    AppSecret    = legacy.AppSecret,    // already ciphertext, preserve
+                    AppKey = legacy.AppKey,
+                    AppSecret = legacy.AppSecret,    // already ciphertext, preserve
                     RefreshToken = legacy.RefreshToken, // already ciphertext, preserve
-                    AccountId    = null,
-                    Email        = null,
-                    DisplayName  = null,
-                    SavedAt      = legacy.SavedAt
+                    AccountId = null,
+                    Email = null,
+                    DisplayName = null,
+                    SavedAt = legacy.SavedAt
                 };
                 return migrated;
             }
@@ -511,13 +511,13 @@ namespace DbxProvider.Services
 
         private static StoredAccount DecryptAccount(StoredAccount stored) => new()
         {
-            AppKey       = stored.AppKey,
-            AppSecret    = Decrypt(stored.AppSecret),
+            AppKey = stored.AppKey,
+            AppSecret = Decrypt(stored.AppSecret),
             RefreshToken = Decrypt(stored.RefreshToken),
-            AccountId    = stored.AccountId,
-            Email        = stored.Email,
-            DisplayName  = stored.DisplayName,
-            SavedAt      = stored.SavedAt
+            AccountId = stored.AccountId,
+            Email = stored.Email,
+            DisplayName = stored.DisplayName,
+            SavedAt = stored.SavedAt
         };
 
         private static string? ResolveDefaultKey(CredentialFileV2 file)
@@ -556,10 +556,10 @@ namespace DbxProvider.Services
         /// <summary>Internal v1 shape, used only by the migration path.</summary>
         private sealed class LegacyCredentialFile
         {
-            [JsonPropertyName("appKey")]        public string? AppKey { get; set; }
-            [JsonPropertyName("appSecret")]     public string? AppSecret { get; set; }
-            [JsonPropertyName("refreshToken")]  public string? RefreshToken { get; set; }
-            [JsonPropertyName("savedAt")]       public DateTimeOffset SavedAt { get; set; }
+            [JsonPropertyName("appKey")] public string? AppKey { get; set; }
+            [JsonPropertyName("appSecret")] public string? AppSecret { get; set; }
+            [JsonPropertyName("refreshToken")] public string? RefreshToken { get; set; }
+            [JsonPropertyName("savedAt")] public DateTimeOffset SavedAt { get; set; }
         }
 
 
