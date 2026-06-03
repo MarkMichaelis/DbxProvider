@@ -89,7 +89,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => ListFolderCoreAsync(path, recursive, includeDeleted), cancellationToken);
 
         private async Task<List<DropboxItem>> ListFolderCoreAsync(string path, bool recursive = false, bool includeDeleted = false)
-{
+        {
             var (items, _) = await ListFolderWithCursorAsync(path, recursive, includeDeleted);
             return items;
         }
@@ -104,7 +104,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => ListFolderWithCursorCoreAsync(path, recursive, includeDeleted), cancellationToken);
 
         private async Task<(List<DropboxItem> Items, string Cursor)> ListFolderWithCursorCoreAsync(string path, bool recursive = false, bool includeDeleted = false)
-{
+        {
             var dbxPath = NormalizePath(path);
             var items = new List<DropboxItem>();
             var result = await _client.Files.ListFolderAsync(dbxPath, recursive, includeDeleted: includeDeleted,
@@ -143,7 +143,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => ListFolderContinueRawCoreAsync(cursor), cancellationToken);
 
         private async Task<ListFolderDelta> ListFolderContinueRawCoreAsync(string cursor)
-{
+        {
             var delta = new ListFolderDelta();
             try
             {
@@ -180,7 +180,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => GetMetadataCoreAsync(path, includeDeleted), cancellationToken);
 
         private async Task<DropboxItem> GetMetadataCoreAsync(string path, bool includeDeleted = false)
-{
+        {
             var dbxPath = NormalizePath(path);
             if (string.IsNullOrEmpty(dbxPath))
                 return new DropboxItem { Name = "", Path = "/", IsFolder = true, Id = "root" };
@@ -193,7 +193,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => ItemExistsCoreAsync(path), cancellationToken);
 
         private async Task<bool> ItemExistsCoreAsync(string path)
-{
+        {
             try { await GetMetadataAsync(path); return true; }
             catch (ApiException<GetMetadataError>) { return false; }
         }
@@ -206,7 +206,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => DownloadCoreAsync(path), cancellationToken);
 
         private async Task<(Stream Content, DropboxItem Metadata)> DownloadCoreAsync(string path)
-{
+        {
             var response = await _client.Files.DownloadAsync(NormalizePath(path));
             return (await response.GetContentAsStreamAsync(), MapMetadataToItem(response.Response));
         }
@@ -215,7 +215,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => DownloadBytesCoreAsync(path), cancellationToken);
 
         private async Task<byte[]> DownloadBytesCoreAsync(string path)
-{
+        {
             var response = await _client.Files.DownloadAsync(NormalizePath(path));
             return await response.GetContentAsByteArrayAsync();
         }
@@ -224,7 +224,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => UploadCoreAsync(path, content, mode), cancellationToken);
 
         private async Task<DropboxItem> UploadCoreAsync(string path, Stream content, WriteMode? mode = null)
-{
+        {
             var dbxPath = NormalizePath(path);
             mode ??= WriteMode.Overwrite.Instance;
             if (content.CanSeek && content.Length <= EffectiveThreshold)
@@ -283,7 +283,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => CopyCoreAsync(fromPath, toPath), cancellationToken);
 
         private async Task<DropboxItem> CopyCoreAsync(string fromPath, string toPath)
-{
+        {
             var result = await _client.Files.CopyV2Async(NormalizePath(fromPath), NormalizePath(toPath));
             return MapMetadataToItem(result.Metadata);
         }
@@ -292,7 +292,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => MoveCoreAsync(fromPath, toPath), cancellationToken);
 
         private async Task<DropboxItem> MoveCoreAsync(string fromPath, string toPath)
-{
+        {
             var result = await _client.Files.MoveV2Async(NormalizePath(fromPath), NormalizePath(toPath));
             return MapMetadataToItem(result.Metadata);
         }
@@ -301,7 +301,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => DeleteCoreAsync(path), cancellationToken);
 
         private async Task DeleteCoreAsync(string path)
-{
+        {
             var dbxPath = NormalizePath(path);
             await _client.Files.DeleteV2Async(dbxPath);
         }
@@ -310,7 +310,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => CreateFolderCoreAsync(path), cancellationToken);
 
         private async Task<DropboxItem> CreateFolderCoreAsync(string path)
-{
+        {
             var result = await _client.Files.CreateFolderV2Async(NormalizePath(path));
             return MapMetadataToItem(result.Metadata);
         }
@@ -335,7 +335,7 @@ namespace DbxProvider.Services
             IEnumerable<FileCategory>? fileCategories = null,
             FileStatus? fileStatus = null,
             SearchOrderBy? orderBy = null)
-{
+        {
             var options = new SearchOptions(
                 path: string.IsNullOrEmpty(path) ? null : NormalizePath(path),
                 maxResults: (ulong)maxResults,
@@ -395,7 +395,7 @@ namespace DbxProvider.Services
 
         private async Task<List<DropboxItem>> SearchByFilenameCoreAsync(string pattern,
             string path = "", int maxResults = 1000)
-{
+        {
             var wildcard = new WildcardMatcher(pattern);
 
             // Convert PS wildcard pattern to a Dropbox token query: split on
@@ -472,14 +472,18 @@ namespace DbxProvider.Services
             RetryAsync(_ => ListRevisionsCoreAsync(path, limit), cancellationToken);
 
         private async Task<List<DropboxRevision>> ListRevisionsCoreAsync(string path, int limit = 10)
-{
+        {
             var result = await _client.Files.ListRevisionsAsync(NormalizePath(path), limit: (ulong)limit);
             return result.Entries.Select(e => new DropboxRevision
             {
-                Name = e.Name, Path = e.PathDisplay ?? e.PathLower ?? "",
-                Rev = e.Rev, Length = e.Size,
-                ServerModified = e.ServerModified, ClientModified = e.ClientModified,
-                ContentHash = e.ContentHash ?? "", IsDeleted = result.IsDeleted
+                Name = e.Name,
+                Path = e.PathDisplay ?? e.PathLower ?? "",
+                Rev = e.Rev,
+                Size = e.Size,
+                ServerModified = e.ServerModified,
+                ClientModified = e.ClientModified,
+                ContentHash = e.ContentHash ?? "",
+                IsDeleted = result.IsDeleted
             }).ToList();
         }
 
@@ -487,7 +491,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => RestoreCoreAsync(path, rev), cancellationToken);
 
         private async Task<DropboxItem> RestoreCoreAsync(string path, string rev)
-{
+        {
             var metadata = await _client.Files.RestoreAsync(NormalizePath(path), rev);
             return MapMetadataToItem(metadata);
         }
@@ -500,7 +504,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => GetTemporaryLinkCoreAsync(path), cancellationToken);
 
         private async Task<string> GetTemporaryLinkCoreAsync(string path)
-{
+        {
             var result = await _client.Files.GetTemporaryLinkAsync(NormalizePath(path));
             return result.Link;
         }
@@ -509,7 +513,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => SaveUrlCoreAsync(path, url), cancellationToken);
 
         private async Task<string> SaveUrlCoreAsync(string path, string url)
-{
+        {
             var result = await _client.Files.SaveUrlAsync(NormalizePath(path), url);
             return result.IsAsyncJobId ? result.AsAsyncJobId.Value : "complete";
         }
@@ -522,7 +526,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => GetPreviewCoreAsync(path), cancellationToken);
 
         private async Task<(byte[] Content, string ContentType)> GetPreviewCoreAsync(string path)
-{
+        {
             var result = await _client.Files.GetPreviewAsync(NormalizePath(path));
             return (await result.GetContentAsByteArrayAsync(), "application/pdf");
         }
@@ -531,7 +535,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => GetThumbnailCoreAsync(path, size, format), cancellationToken);
 
         private async Task<byte[]> GetThumbnailCoreAsync(string path, string size = "w64h64", string format = "jpeg")
-{
+        {
             ThumbnailSize thumbSize = size switch
             {
                 "w32h32" => ThumbnailSize.W32h32.Instance,
@@ -556,7 +560,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => ExportFileCoreAsync(path), cancellationToken);
 
         private async Task<(byte[] Content, DropboxItem Metadata)> ExportFileCoreAsync(string path)
-{
+        {
             var result = await _client.Files.ExportAsync(NormalizePath(path));
             var bytes = await result.GetContentAsByteArrayAsync();
             return (bytes, new DropboxItem
@@ -578,7 +582,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => GetTagsCoreAsync(paths), cancellationToken);
 
         private async Task<List<DropboxTag>> GetTagsCoreAsync(params string[] paths)
-{
+        {
             var pathList = paths.Select(p => NormalizePath(p)).ToList();
             var result = await _client.Files.TagsGetAsync(new GetTagsArg(pathList));
             var tags = new List<DropboxTag>();
@@ -598,7 +602,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => AddTagCoreAsync(path, tagText), cancellationToken);
 
         private async Task AddTagCoreAsync(string path, string tagText)
-{
+        {
             await _client.Files.TagsAddAsync(NormalizePath(path), tagText);
         }
 
@@ -606,7 +610,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => RemoveTagCoreAsync(path, tagText), cancellationToken);
 
         private async Task RemoveTagCoreAsync(string path, string tagText)
-{
+        {
             await _client.Files.TagsRemoveAsync(NormalizePath(path), tagText);
         }
 
@@ -620,7 +624,7 @@ namespace DbxProvider.Services
 
         private async Task<DropboxSharedLink> CreateSharedLinkCoreAsync(string path,
             string? requestedVisibility = null, DateTime? expires = null)
-{
+        {
             RequestedVisibility? vis = requestedVisibility switch
             {
                 "public" => RequestedVisibility.Public.Instance,
@@ -637,7 +641,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => ListSharedLinksCoreAsync(path, cursor), cancellationToken);
 
         private async Task<List<DropboxSharedLink>> ListSharedLinksCoreAsync(string? path = null, string? cursor = null)
-{
+        {
             var dbxPath = path != null ? NormalizePath(path) : null;
             var result = await _client.Sharing.ListSharedLinksAsync(dbxPath, cursor);
             var links = result.Links.Select(MapSharedLink).ToList();
@@ -656,7 +660,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => GetSharedLinkMetadataCoreAsync(url), cancellationToken);
 
         private async Task<DropboxSharedLink> GetSharedLinkMetadataCoreAsync(string url)
-{
+        {
             var result = await _client.Sharing.GetSharedLinkMetadataAsync(url);
             return MapSharedLink(result);
         }
@@ -669,7 +673,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => ShareFolderCoreAsync(path), cancellationToken);
 
         private async Task<string> ShareFolderCoreAsync(string path)
-{
+        {
             var result = await _client.Sharing.ShareFolderAsync(NormalizePath(path));
             return result.IsComplete ? result.AsComplete.Value.SharedFolderId
                 : result.AsAsyncJobId?.Value ?? "pending";
@@ -682,7 +686,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => ListSharedFoldersCoreAsync(), cancellationToken);
 
         private async Task<List<DropboxSharedFolder>> ListSharedFoldersCoreAsync()
-{
+        {
             var result = await _client.Sharing.ListFoldersAsync();
             var folders = new List<DropboxSharedFolder>(result.Entries.Select(MapSharedFolder));
             while (!string.IsNullOrEmpty(result.Cursor))
@@ -697,7 +701,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => GetSharedFolderMetadataCoreAsync(sharedFolderId), cancellationToken);
 
         private async Task<DropboxSharedFolder> GetSharedFolderMetadataCoreAsync(string sharedFolderId)
-{
+        {
             var result = await _client.Sharing.GetFolderMetadataAsync(sharedFolderId);
             return MapSharedFolder(result);
         }
@@ -710,7 +714,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => AddFolderMemberCoreAsync(sharedFolderId, email, accessLevel), cancellationToken);
 
         private async Task AddFolderMemberCoreAsync(string sharedFolderId, string email, string accessLevel = "viewer")
-{
+        {
             var level = ParseAccessLevel(accessLevel);
             var member = new AddMember(new MemberSelector.Email(email), level);
             await _client.Sharing.AddFolderMemberAsync(sharedFolderId, new[] { member });
@@ -723,7 +727,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => ListFolderMembersCoreAsync(sharedFolderId), cancellationToken);
 
         private async Task<List<DropboxMember>> ListFolderMembersCoreAsync(string sharedFolderId)
-{
+        {
             var result = await _client.Sharing.ListFolderMembersAsync(sharedFolderId);
             return result.Users.Select(MapUserMember).ToList();
         }
@@ -732,7 +736,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => AddFileMemberCoreAsync(filePath, email, accessLevel), cancellationToken);
 
         private async Task AddFileMemberCoreAsync(string filePath, string email, string accessLevel = "viewer")
-{
+        {
             var level = ParseAccessLevel(accessLevel);
             var member = new MemberSelector.Email(email);
             await _client.Sharing.AddFileMemberAsync(NormalizePath(filePath),
@@ -747,7 +751,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => ListFileMembersCoreAsync(filePath), cancellationToken);
 
         private async Task<List<DropboxMember>> ListFileMembersCoreAsync(string filePath)
-{
+        {
             var result = await _client.Sharing.ListFileMembersAsync(NormalizePath(filePath));
             return result.Users.Select(MapUserMember).ToList();
         }
@@ -780,15 +784,20 @@ namespace DbxProvider.Services
             RetryAsync(_ => GetCurrentAccountCoreAsync(), cancellationToken);
 
         private async Task<DropboxAccount> GetCurrentAccountCoreAsync()
-{
+        {
             var a = await _client.Users.GetCurrentAccountAsync();
             return new DropboxAccount
             {
-                AccountId = a.AccountId, DisplayName = a.Name.DisplayName,
-                Email = a.Email, EmailVerified = a.EmailVerified,
-                ProfilePhotoUrl = a.ProfilePhotoUrl ?? "", Country = a.Country ?? "",
-                Locale = a.Locale ?? "", AccountType = a.AccountType?.ToString() ?? "unknown",
-                ReferralLink = a.ReferralLink ?? "", IsPaired = a.IsPaired
+                AccountId = a.AccountId,
+                DisplayName = a.Name.DisplayName,
+                Email = a.Email,
+                EmailVerified = a.EmailVerified,
+                ProfilePhotoUrl = a.ProfilePhotoUrl ?? "",
+                Country = a.Country ?? "",
+                Locale = a.Locale ?? "",
+                AccountType = a.AccountType?.ToString() ?? "unknown",
+                ReferralLink = a.ReferralLink ?? "",
+                IsPaired = a.IsPaired
             };
         }
 
@@ -796,12 +805,14 @@ namespace DbxProvider.Services
             RetryAsync(_ => GetAccountCoreAsync(accountId), cancellationToken);
 
         private async Task<DropboxAccount> GetAccountCoreAsync(string accountId)
-{
+        {
             var a = await _client.Users.GetAccountAsync(accountId);
             return new DropboxAccount
             {
-                AccountId = a.AccountId, DisplayName = a.Name.DisplayName,
-                Email = a.Email, EmailVerified = a.EmailVerified,
+                AccountId = a.AccountId,
+                DisplayName = a.Name.DisplayName,
+                Email = a.Email,
+                EmailVerified = a.EmailVerified,
                 ProfilePhotoUrl = a.ProfilePhotoUrl ?? ""
             };
         }
@@ -810,7 +821,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => GetSpaceUsageCoreAsync(), cancellationToken);
 
         private async Task<DropboxSpaceUsage> GetSpaceUsageCoreAsync()
-{
+        {
             var usage = await _client.Users.GetSpaceUsageAsync();
             ulong allocated = 0; string label = "";
             if (usage.Allocation.IsIndividual)
@@ -854,7 +865,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => DeleteBatchCoreAsync(paths), cancellationToken);
 
         private async Task DeleteBatchCoreAsync(IEnumerable<string> paths)
-{
+        {
             var entries = paths.Select(p => new DeleteArg(NormalizePath(p))).ToList();
             var result = await _client.Files.DeleteBatchAsync(entries);
             if (result.IsAsyncJobId)
@@ -893,7 +904,7 @@ namespace DbxProvider.Services
             RetryAsync(_ => CreatePaperDocCoreAsync(path, content, importFormat), cancellationToken);
 
         private async Task<string> CreatePaperDocCoreAsync(string path, byte[] content, string importFormat = "html")
-{
+        {
             var format = ParseImportFormat(importFormat);
             using var stream = new MemoryStream(content);
             var result = await _client.Files.PaperCreateAsync(NormalizePath(path), format, body: stream);
@@ -906,7 +917,7 @@ namespace DbxProvider.Services
 
         private async Task<string> UpdatePaperDocCoreAsync(string path, byte[] content,
             string importFormat = "html", string docUpdatePolicy = "overwrite")
-{
+        {
             var format = ParseImportFormat(importFormat);
             PaperDocUpdatePolicy policy = docUpdatePolicy.ToLowerInvariant() switch
             {
@@ -967,17 +978,22 @@ namespace DbxProvider.Services
 
         private static DropboxSharedLink MapSharedLink(SharedLinkMetadata link) => new()
         {
-            Url = link.Url, Path = link.PathLower ?? "", Name = link.Name,
-            Id = link.Id ?? "", Expires = link.Expires,
+            Url = link.Url,
+            Path = link.PathLower ?? "",
+            Name = link.Name,
+            Id = link.Id ?? "",
+            Expires = link.Expires,
             Visibility = link.LinkPermissions?.ResolvedVisibility?.ToString() ?? ""
         };
 
         private static DropboxSharedFolder MapSharedFolder(SharedFolderMetadata folder) => new()
         {
-            SharedFolderId = folder.SharedFolderId, Name = folder.Name,
+            SharedFolderId = folder.SharedFolderId,
+            Name = folder.Name,
             PathLower = folder.PathLower ?? "",
             AccessType = folder.AccessType?.ToString() ?? "unknown",
-            IsInsideTeamFolder = folder.IsInsideTeamFolder, IsTeamFolder = folder.IsTeamFolder
+            IsInsideTeamFolder = folder.IsInsideTeamFolder,
+            IsTeamFolder = folder.IsTeamFolder
         };
 
         #endregion
