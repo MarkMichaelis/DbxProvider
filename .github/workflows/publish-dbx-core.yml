@@ -1,0 +1,31 @@
+name: Publish Dbx.Core
+
+# Publishes the IntelliTect.Dropbox.Core NuGet package to GitHub Packages when
+# a tag of the form `dbx-core-v*` is pushed (e.g. dbx-core-v0.1.0). Keep the
+# csproj <Version> in sync with the tag before tagging.
+on:
+  push:
+    tags:
+      - 'dbx-core-v*'
+  workflow_dispatch:
+
+permissions:
+  packages: write
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Pack
+        run: dotnet pack src/Dbx.Core/Dbx.Core.csproj -c Release -o ./artifacts
+      - name: Push to GitHub Packages
+        run: >
+          dotnet nuget push "./artifacts/*.nupkg"
+          --source https://nuget.pkg.github.com/MarkMichaelis/index.json
+          --api-key ${{ secrets.GITHUB_TOKEN }}
+          --skip-duplicate
