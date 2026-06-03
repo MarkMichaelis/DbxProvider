@@ -195,9 +195,9 @@ namespace DbxProvider.Services
             }
 
             // 1. Exact dictionary key match (covers "dbid:..." and the literal "default" pre-auth key).
-            if (file.Accounts.TryGetValue(selector, out var byKey))
+            if (file.Accounts.TryGetValue(selector!, out var byKey))
             {
-                return new StoredAccountEntry(selector, DecryptAccount(byKey),
+                return new StoredAccountEntry(selector!, DecryptAccount(byKey),
                     string.Equals(selector, defaultKey, StringComparison.Ordinal));
             }
 
@@ -592,7 +592,7 @@ namespace DbxProvider.Services
         {
             if (string.IsNullOrEmpty(stored)) return null;
 
-            if (stored.StartsWith("dpapi:", StringComparison.Ordinal))
+            if (stored!.StartsWith("dpapi:", StringComparison.Ordinal))
             {
                 if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                     return null;
