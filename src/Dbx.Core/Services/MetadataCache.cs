@@ -356,7 +356,7 @@ namespace DbxProvider.Services
         {
             using var sha = SHA256.Create();
             var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(input ?? ""));
-            return Convert.ToHexString(bytes).ToLowerInvariant();
+            return BitConverter.ToString(bytes).Replace("-", "").ToLowerInvariant();
         }
     }
 }

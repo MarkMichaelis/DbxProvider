@@ -150,8 +150,10 @@ namespace DbxProvider.Services
 
             var defaultKey = ResolveDefaultKey(file);
             var result = new List<StoredAccountEntry>(file.Accounts.Count);
-            foreach (var (key, raw) in file.Accounts)
+            foreach (var kvp in file.Accounts)
             {
+                var key = kvp.Key;
+                var raw = kvp.Value;
                 result.Add(new StoredAccountEntry(key, DecryptAccount(raw),
                     string.Equals(key, defaultKey, StringComparison.Ordinal)));
             }
@@ -615,7 +617,9 @@ namespace DbxProvider.Services
             {
                 if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                 {
+#if NET8_0_OR_GREATER
                     File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+#endif
                 }
             }
             catch

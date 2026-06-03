@@ -9,6 +9,7 @@ using Dropbox.Api.Files;
 using Dropbox.Api.Sharing;
 using Dropbox.Api.Users;
 using DbxProvider.Models;
+using Dbx.Core.Wildcards;
 
 namespace DbxProvider.Services
 {
@@ -385,8 +386,8 @@ namespace DbxProvider.Services
         /// Filename-only search using a PowerShell wildcard pattern. Dropbox's
         /// search_v2 is prefix-token-based (not glob), so we derive a token
         /// query from the pattern, then post-filter the results with
-        /// <see cref="System.Management.Automation.WildcardPattern"/> to enforce
-        /// true PowerShell wildcard semantics.
+        /// <see cref="WildcardMatcher"/> to enforce true PowerShell wildcard
+        /// semantics without depending on System.Management.Automation.
         /// </summary>
         public Task<List<DropboxItem>> SearchByFilenameAsync(string pattern,
             string path = "", int maxResults = 1000, CancellationToken cancellationToken = default) =>
@@ -395,8 +396,7 @@ namespace DbxProvider.Services
         private async Task<List<DropboxItem>> SearchByFilenameCoreAsync(string pattern,
             string path = "", int maxResults = 1000)
 {
-            var wildcard = new System.Management.Automation.WildcardPattern(
-                pattern, System.Management.Automation.WildcardOptions.IgnoreCase);
+            var wildcard = new WildcardMatcher(pattern);
 
             // Convert PS wildcard pattern to a Dropbox token query: split on
             // wildcard chars and path/filename separators, keep tokens of >=2

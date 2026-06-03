@@ -3,10 +3,10 @@ using Xunit;
 namespace DbxProvider.UnitTests;
 
 /// <summary>
-/// Groups tests that mutate the process-wide <c>LOCALAPPDATA</c> environment
-/// variable to redirect the static <see cref="DbxProvider.Services.CredentialStore"/>.
-/// Parallelization is disabled so these classes never clobber each other's
-/// temp credential file.
+/// Host-side definition of the "CredentialStore" collection so credential
+/// adapter tests that redirect process-wide <c>LOCALAPPDATA</c> never run in
+/// parallel with each other. Mirrors the Dbx.Core.UnitTests definition; xUnit
+/// collections are per-assembly.
 /// </summary>
 [CollectionDefinition("CredentialStore", DisableParallelization = true)]
 public sealed class CredentialStoreCollection
