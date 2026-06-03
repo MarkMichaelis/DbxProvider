@@ -5,7 +5,7 @@ using System.Linq;
 using DbxProvider.Services;
 using Xunit;
 
-namespace DbxProvider.UnitTests;
+namespace Dbx.Core.UnitTests;
 
 /// <summary>
 /// Tests for the v2 multi-account credential store. Each test redirects
