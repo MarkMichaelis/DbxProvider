@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using DbxProvider.Services;
 using Xunit;
 
-namespace DbxProvider.UnitTests;
+namespace Dbx.Core.UnitTests;
 
 public class RateLimitRetryTests
 {
