@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Dbx.Core</RootNamespace>
+    <AssemblyName>Dbx.Core</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <!-- NuGet packaging metadata -->
+  <PropertyGroup>
+    <PackageId>IntelliTect.Dropbox.Core</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>IntelliTect</Authors>
+    <Description>Standalone Dropbox client core: a comprehensive Dropbox API v2 wrapper, metadata cache, rate-limit retry, credential persistence, and a framework-neutral wildcard matcher. Builds a DropboxClient directly from an app key/secret/refresh token (or access token). PowerShell-free. Extracted from DbxProvider.</Description>
+    <RepositoryUrl>https://github.com/MarkMichaelis/DbxProvider</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>dropbox;api;client;cache;credentials</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Dbx.Core.UnitTests" />
+    <InternalsVisibleTo Include="DbxProvider" />
+    <InternalsVisibleTo Include="DbxProvider.UnitTests" />
+    <InternalsVisibleTo Include="DbxProvider.FunctionalTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Dropbox.Api" Version="7.0.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
+  <!-- netstandard2.0 lacks the in-box System.Text.Json; provide it only there. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+</Project>
