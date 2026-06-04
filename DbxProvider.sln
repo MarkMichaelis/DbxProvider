@@ -21,6 +21,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IntelliTect.Dropbox.Core", 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dbx.Core.UnitTests", "test\Dbx.Core.UnitTests\Dbx.Core.UnitTests.csproj", "{BA31736E-A2F0-40BD-A27C-6F21543023D1}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DbxProvider.ProviderHostTests", "test\DbxProvider.ProviderHostTests\DbxProvider.ProviderHostTests.csproj", "{19588A69-563D-44A6-B6CD-ECA0452FF28F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -115,6 +117,18 @@ Global
 		{BA31736E-A2F0-40BD-A27C-6F21543023D1}.Release|x64.Build.0 = Release|Any CPU
 		{BA31736E-A2F0-40BD-A27C-6F21543023D1}.Release|x86.ActiveCfg = Release|Any CPU
 		{BA31736E-A2F0-40BD-A27C-6F21543023D1}.Release|x86.Build.0 = Release|Any CPU
+		{19588A69-563D-44A6-B6CD-ECA0452FF28F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{19588A69-563D-44A6-B6CD-ECA0452FF28F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{19588A69-563D-44A6-B6CD-ECA0452FF28F}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{19588A69-563D-44A6-B6CD-ECA0452FF28F}.Debug|x64.Build.0 = Debug|Any CPU
+		{19588A69-563D-44A6-B6CD-ECA0452FF28F}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{19588A69-563D-44A6-B6CD-ECA0452FF28F}.Debug|x86.Build.0 = Debug|Any CPU
+		{19588A69-563D-44A6-B6CD-ECA0452FF28F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{19588A69-563D-44A6-B6CD-ECA0452FF28F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{19588A69-563D-44A6-B6CD-ECA0452FF28F}.Release|x64.ActiveCfg = Release|Any CPU
+		{19588A69-563D-44A6-B6CD-ECA0452FF28F}.Release|x64.Build.0 = Release|Any CPU
+		{19588A69-563D-44A6-B6CD-ECA0452FF28F}.Release|x86.ActiveCfg = Release|Any CPU
+		{19588A69-563D-44A6-B6CD-ECA0452FF28F}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -125,5 +139,6 @@ Global
 		{36A52B97-F9C8-43D1-A6B4-ACFF1CD9C990} = {0C88DD14-F956-CE84-757C-A364CCF449FC}
 		{2F3DF3D8-8687-4264-931F-35AE42AFE8E9} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{BA31736E-A2F0-40BD-A27C-6F21543023D1} = {0C88DD14-F956-CE84-757C-A364CCF449FC}
+		{19588A69-563D-44A6-B6CD-ECA0452FF28F} = {0C88DD14-F956-CE84-757C-A364CCF449FC}
 	EndGlobalSection
 EndGlobal
