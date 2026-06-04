@@ -66,8 +66,28 @@ namespace DbxProvider.Cmdlets
         [Parameter]
         public string DriveName { get; set; } = "Dbx";
 
+        /// <summary>
+        /// Cancelled when the pipeline stops (Ctrl+C) via <see cref="StopProcessing"/>.
+        /// Threaded into the loopback OAuth flow and the Playwright app-registration
+        /// wizard so both blocking operations unblock promptly on cancellation.
+        /// </summary>
+        private System.Threading.CancellationTokenSource? _stopCts;
+
+        /// <summary>
+        /// Invoked by PowerShell on a separate thread when the pipeline is stopped
+        /// (Ctrl+C). Cancels <see cref="_stopCts"/> so the OAuth callback wait and the
+        /// app-registration wizard terminate instead of hanging.
+        /// </summary>
+        protected override void StopProcessing()
+        {
+            try { _stopCts?.Cancel(); }
+            catch (ObjectDisposedException) { /* already torn down */ }
+            base.StopProcessing();
+        }
+
         protected override void ProcessRecord()
         {
+            _stopCts = new System.Threading.CancellationTokenSource();
             try
             {
                 DropboxServiceClient service;
@@ -217,6 +237,11 @@ namespace DbxProvider.Cmdlets
                 ThrowTerminatingError(new ErrorRecord(ex, "ConnectDropboxFailed",
                     ErrorCategory.AuthenticationError, null));
             }
+            finally
+            {
+                _stopCts?.Dispose();
+                _stopCts = null;
+            }
         }
 
         private (string AccessToken, string? RefreshToken) RunOAuthFlow(string appKey, string? appSecret, int port)
@@ -225,7 +250,10 @@ namespace DbxProvider.Cmdlets
 
             // Cancel the loopback flow when the pipeline stops (Ctrl+C) or the
             // user presses Esc, preserving the prior cancellation behaviour.
-            using var cts = new System.Threading.CancellationTokenSource();
+            // Linking to _stopCts means StopProcessing() (Ctrl+C) also fires here.
+            using var cts = _stopCts != null
+                ? System.Threading.CancellationTokenSource.CreateLinkedTokenSource(_stopCts.Token)
+                : new System.Threading.CancellationTokenSource();
             var monitor = System.Threading.Tasks.Task.Run(() =>
             {
                 while (!cts.IsCancellationRequested)
@@ -337,7 +365,7 @@ namespace DbxProvider.Cmdlets
                             launcher,
                             new CmdletConsole(Host.UI));
                         var result = registrar
-                            .RegisterAsync(redirectUri, scopes, System.Threading.CancellationToken.None)
+                            .RegisterAsync(redirectUri, scopes, _stopCts?.Token ?? System.Threading.CancellationToken.None)
                             .GetAwaiter().GetResult();
                         if (result is not null)
                         {
