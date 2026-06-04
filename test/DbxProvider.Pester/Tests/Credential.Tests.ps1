@@ -14,7 +14,7 @@ BeforeAll {
 
     # Verify the redirect actually took effect before letting any test run.
     $expectedRoot = Join-Path $script:TempLocalAppData 'DbxProvider'
-    $actualPath   = [DbxProvider.Services.CredentialStore]::CredentialFilePath
+    $actualPath   = [IntelliTect.Dropbox.CredentialStore]::CredentialFilePath
     if (-not $actualPath.StartsWith($expectedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
         $env:LOCALAPPDATA = $script:OrigLocalAppData
         throw "Credential test sandbox redirect failed (path was '$actualPath'). Aborting to protect real credentials."

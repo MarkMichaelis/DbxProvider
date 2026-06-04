@@ -103,7 +103,7 @@ This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable
 
 ## OUTPUTS
 
-### DbxProvider.Models.DropboxAccount
+### IntelliTect.Dropbox.DropboxAccount
 
 ## NOTES
 

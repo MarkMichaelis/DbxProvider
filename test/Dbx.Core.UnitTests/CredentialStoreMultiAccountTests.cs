@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using DbxProvider.Services;
+using IntelliTect.Dropbox;
 using Xunit;
 
 namespace Dbx.Core.UnitTests;

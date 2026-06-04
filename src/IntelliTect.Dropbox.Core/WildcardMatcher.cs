@@ -2,7 +2,7 @@ using System;
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace Dbx.Core.Wildcards
+namespace IntelliTect.Dropbox
 {
     /// <summary>
     /// Framework-neutral wildcard matcher that reproduces PowerShell

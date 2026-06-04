@@ -1,4 +1,4 @@
-using DbxProvider.Models;
+using IntelliTect.Dropbox;
 using Xunit;
 
 namespace DbxProvider.UnitTests;

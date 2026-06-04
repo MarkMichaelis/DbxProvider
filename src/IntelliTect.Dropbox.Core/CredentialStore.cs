@@ -8,7 +8,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace DbxProvider.Services
+namespace IntelliTect.Dropbox
 {
     /// <summary>
     /// Sentinel key used in the v2 accounts dictionary for credentials that

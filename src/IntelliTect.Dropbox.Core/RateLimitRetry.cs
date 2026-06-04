@@ -8,7 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Dropbox.Api;
 
-namespace DbxProvider.Services
+namespace IntelliTect.Dropbox
 {
     /// <summary>
     /// Receives notifications when a Dropbox API call is being retried due to

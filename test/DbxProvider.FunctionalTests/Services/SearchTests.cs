@@ -24,7 +24,7 @@ public class SearchTests
             using (var ms = new MemoryStream(Encoding.UTF8.GetBytes("search target")))
                 await svc.UploadAsync(path, ms);
 
-            List<DbxProvider.Models.DropboxSearchResult> results = new();
+            List<IntelliTect.Dropbox.DropboxSearchResult> results = new();
             for (int i = 0; i < 12; i++)
             {
                 results = await svc.SearchAsync(token, folder, maxResults: 25);
@@ -57,7 +57,7 @@ public class SearchTests
             using (var ms = new MemoryStream(Encoding.UTF8.GetBytes("b")))
                 await svc.UploadAsync(logPath, ms);
 
-            List<DbxProvider.Models.DropboxSearchResult> results = new();
+            List<IntelliTect.Dropbox.DropboxSearchResult> results = new();
             for (int i = 0; i < 12; i++)
             {
                 results = await svc.SearchAsync(token, folder, maxResults: 25,
@@ -91,7 +91,7 @@ public class SearchTests
             using (var ms = new MemoryStream(Encoding.UTF8.GetBytes("b")))
                 await svc.UploadAsync(logPath, ms);
 
-            List<DbxProvider.Models.DropboxItem> items = new();
+            List<IntelliTect.Dropbox.DropboxItem> items = new();
             for (int i = 0; i < 12; i++)
             {
                 items = await svc.SearchByFilenameAsync($"{token}*.txt", folder, maxResults: 25);

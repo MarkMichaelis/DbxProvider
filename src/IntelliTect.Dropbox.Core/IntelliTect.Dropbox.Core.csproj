@@ -5,8 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
-    <RootNamespace>Dbx.Core</RootNamespace>
-    <AssemblyName>Dbx.Core</AssemblyName>
+    <RootNamespace>IntelliTect.Dropbox</RootNamespace>
+    <AssemblyName>IntelliTect.Dropbox.Core</AssemblyName>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>

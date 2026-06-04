@@ -3,20 +3,21 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Management.Automation.Provider;
+using IntelliTect.Dropbox;
 
 namespace DbxProvider.Provider
 {
     /// <summary>Reads content from a Dropbox file as lines or bytes.</summary>
     public class DropboxContentReader : IContentReader
     {
-        private readonly Services.DropboxServiceClient _service;
+        private readonly DropboxServiceClient _service;
         private readonly string _path;
         private StreamReader? _reader;
         private Stream? _stream;
         private bool _disposed;
         private readonly bool _raw;
 
-        public DropboxContentReader(Services.DropboxServiceClient service, string path, bool raw = false)
+        public DropboxContentReader(DropboxServiceClient service, string path, bool raw = false)
         {
             _service = service;
             _path = path;

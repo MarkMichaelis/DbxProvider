@@ -1,7 +1,7 @@
 using System;
 using System.Management.Automation;
 using Dropbox.Api;
-using DbxProvider.Services;
+using IntelliTect.Dropbox;
 
 namespace DbxProvider.Provider
 {

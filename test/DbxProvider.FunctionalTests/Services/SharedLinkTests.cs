@@ -23,7 +23,7 @@ public class SharedLinkTests
             using (var ms = new MemoryStream(Encoding.UTF8.GetBytes("shared content")))
                 await svc.UploadAsync(path, ms);
 
-            DbxProvider.Models.DropboxSharedLink link;
+            IntelliTect.Dropbox.DropboxSharedLink link;
             try
             {
                 link = await svc.CreateSharedLinkAsync(path);

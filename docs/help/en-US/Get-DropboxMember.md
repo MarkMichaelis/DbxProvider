@@ -125,7 +125,7 @@ This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable
 
 ## OUTPUTS
 
-### DbxProvider.Models.DropboxMember
+### IntelliTect.Dropbox.DropboxMember
 
 ## NOTES
 

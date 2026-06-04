@@ -4,7 +4,7 @@ using System.Management.Automation;
 using System.Threading;
 using System.Threading.Tasks;
 using DbxProvider.Provider;
-using DbxProvider.Services;
+using IntelliTect.Dropbox;
 
 namespace DbxProvider.Cmdlets
 {

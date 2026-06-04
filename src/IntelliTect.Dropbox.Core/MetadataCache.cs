@@ -8,9 +8,8 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using DbxProvider.Models;
 
-namespace DbxProvider.Services
+namespace IntelliTect.Dropbox
 {
     /// <summary>
     /// Cursor-validated, write-through metadata cache for a single Dropbox

@@ -2,7 +2,7 @@ using System;
 using System.Linq;
 using System.Management.Automation;
 using DbxProvider.Provider;
-using DbxProvider.Services;
+using IntelliTect.Dropbox;
 
 namespace DbxProvider.Cmdlets
 {

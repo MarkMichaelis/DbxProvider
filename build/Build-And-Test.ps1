@@ -74,9 +74,9 @@ function Test-DropboxSecretsConfigured {
 param([string]$Dll)
 try {
     Add-Type -Path $Dll -ErrorAction Stop
-    $stored = [DbxProvider.Services.CredentialStore]::Load()
+    $stored = [IntelliTect.Dropbox.CredentialStore]::Load()
     if ($stored -and $stored.AppKey -and $stored.AppSecret -and $stored.RefreshToken) {
-        [pscustomobject]@{ Ok = $true; Path = [DbxProvider.Services.CredentialStore]::CredentialFilePath } | ConvertTo-Json -Compress
+        [pscustomobject]@{ Ok = $true; Path = [IntelliTect.Dropbox.CredentialStore]::CredentialFilePath } | ConvertTo-Json -Compress
     }
 } catch { }
 '@
@@ -211,8 +211,8 @@ try {
             $loadScript = @'
 param([string]$Dll)
 Add-Type -Path $Dll -ErrorAction Stop
-$stored = [DbxProvider.Services.CredentialStore]::Load()
-$path   = [DbxProvider.Services.CredentialStore]::CredentialFilePath
+$stored = [IntelliTect.Dropbox.CredentialStore]::Load()
+$path   = [IntelliTect.Dropbox.CredentialStore]::CredentialFilePath
 [pscustomobject]@{
     AppKey       = if ($stored) { $stored.AppKey }       else { $null }
     AppSecret    = if ($stored) { $stored.AppSecret }    else { $null }

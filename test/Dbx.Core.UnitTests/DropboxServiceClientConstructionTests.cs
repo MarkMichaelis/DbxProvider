@@ -1,5 +1,5 @@
 using System.Linq;
-using DbxProvider.Services;
+using IntelliTect.Dropbox;
 using FluentAssertions;
 using Xunit;
 
