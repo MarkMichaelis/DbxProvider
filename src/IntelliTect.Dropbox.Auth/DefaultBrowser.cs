@@ -6,7 +6,7 @@ using System.Runtime.InteropServices;
 #endif
 using Microsoft.Win32;
 
-namespace MarkMichaelis.Dropbox.Auth;
+namespace IntelliTect.Dropbox.Auth;
 
 /// <summary>
 /// Detects the user's default web browser on Windows by walking the

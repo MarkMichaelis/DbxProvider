@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
-using MarkMichaelis.Dropbox.Auth;
+using IntelliTect.Dropbox.Auth;
 using Xunit;
 
 namespace Dbx.Auth.UnitTests;

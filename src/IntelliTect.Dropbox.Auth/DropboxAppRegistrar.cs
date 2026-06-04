@@ -9,7 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Playwright;
 
-namespace MarkMichaelis.Dropbox.Auth;
+namespace IntelliTect.Dropbox.Auth;
 
 /// <summary>
 /// Drives the Dropbox App Console form via Playwright using a browser context

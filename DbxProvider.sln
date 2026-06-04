@@ -13,7 +13,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DbxProvider.UnitTests", "te
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MarkMichaelis.Dropbox.Auth", "src\Dbx.Auth\MarkMichaelis.Dropbox.Auth.csproj", "{ED40F7C2-B920-438E-AE1A-842674C701E2}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IntelliTect.Dropbox.Auth", "src\IntelliTect.Dropbox.Auth\IntelliTect.Dropbox.Auth.csproj", "{ED40F7C2-B920-438E-AE1A-842674C701E2}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dbx.Auth.UnitTests", "test\Dbx.Auth.UnitTests\Dbx.Auth.UnitTests.csproj", "{36A52B97-F9C8-43D1-A6B4-ACFF1CD9C990}"
 EndProject

@@ -3,7 +3,7 @@ using System.IO;
 using System.Management.Automation.Host;
 using System.Threading;
 using System.Threading.Tasks;
-using MarkMichaelis.Dropbox.Auth;
+using IntelliTect.Dropbox.Auth;
 using Microsoft.Playwright;
 
 namespace DbxProvider.Services;

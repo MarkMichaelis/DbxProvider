@@ -1,5 +1,5 @@
 using System;
-using MarkMichaelis.Dropbox.Auth;
+using IntelliTect.Dropbox.Auth;
 
 namespace DbxProvider.Services;
 

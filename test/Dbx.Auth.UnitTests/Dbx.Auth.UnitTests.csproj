@@ -17,7 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Dbx.Auth\MarkMichaelis.Dropbox.Auth.csproj" />
+    <ProjectReference Include="..\..\src\IntelliTect.Dropbox.Auth\IntelliTect.Dropbox.Auth.csproj" />
   </ItemGroup>
 
 </Project>

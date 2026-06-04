@@ -1,6 +1,6 @@
-name: Publish Dbx.Auth
+name: Publish IntelliTect.Dropbox.Auth
 
-# Publishes the MarkMichaelis.Dropbox.Auth NuGet package to GitHub Packages when
+# Publishes the IntelliTect.Dropbox.Auth NuGet package to GitHub Packages when
 # a tag of the form `dbx-auth-v*` is pushed (e.g. dbx-auth-v0.1.0). Keep the
 # csproj <Version> in sync with the tag before tagging.
 on:
@@ -22,7 +22,7 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - name: Pack
-        run: dotnet pack src/Dbx.Auth/MarkMichaelis.Dropbox.Auth.csproj -c Release -o ./artifacts
+        run: dotnet pack src/IntelliTect.Dropbox.Auth/IntelliTect.Dropbox.Auth.csproj -c Release -o ./artifacts
       - name: Push to GitHub Packages
         run: >
           dotnet nuget push "./artifacts/*.nupkg"
