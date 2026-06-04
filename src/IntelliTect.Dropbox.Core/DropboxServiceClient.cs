@@ -8,10 +8,8 @@ using Dropbox.Api;
 using Dropbox.Api.Files;
 using Dropbox.Api.Sharing;
 using Dropbox.Api.Users;
-using DbxProvider.Models;
-using Dbx.Core.Wildcards;
 
-namespace DbxProvider.Services
+namespace IntelliTect.Dropbox
 {
     /// <summary>Comprehensive wrapper around the Dropbox API v2.</summary>
     public class DropboxServiceClient : IDisposable
@@ -479,7 +477,7 @@ namespace DbxProvider.Services
                 Name = e.Name,
                 Path = e.PathDisplay ?? e.PathLower ?? "",
                 Rev = e.Rev,
-                Size = e.Size,
+                Length = e.Size,
                 ServerModified = e.ServerModified,
                 ClientModified = e.ClientModified,
                 ContentHash = e.ContentHash ?? "",

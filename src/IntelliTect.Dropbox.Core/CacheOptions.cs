@@ -1,6 +1,6 @@
 using System;
 
-namespace DbxProvider.Services
+namespace IntelliTect.Dropbox
 {
     /// <summary>
     /// Tunable options that govern the metadata cache. A single process-wide

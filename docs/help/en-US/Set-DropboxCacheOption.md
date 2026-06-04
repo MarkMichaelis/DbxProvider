@@ -149,7 +149,7 @@ This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable
 
 ## OUTPUTS
 
-### DbxProvider.Services.CacheOptions
+### IntelliTect.Dropbox.CacheOptions
 
 ## NOTES
 

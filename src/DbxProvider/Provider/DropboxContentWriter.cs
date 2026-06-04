@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.IO;
 using System.Management.Automation.Provider;
+using IntelliTect.Dropbox;
 using System.Text;
 
 namespace DbxProvider.Provider
@@ -9,14 +10,14 @@ namespace DbxProvider.Provider
     /// <summary>Writes content to a Dropbox file.</summary>
     public class DropboxContentWriter : IContentWriter
     {
-        private readonly Services.DropboxServiceClient _service;
+        private readonly DropboxServiceClient _service;
         private readonly string _path;
         private MemoryStream _buffer;
         private StreamWriter? _writer;
         private bool _disposed;
         private readonly bool _raw;
 
-        public DropboxContentWriter(Services.DropboxServiceClient service, string path, bool raw = false)
+        public DropboxContentWriter(DropboxServiceClient service, string path, bool raw = false)
         {
             _service = service;
             _path = path;

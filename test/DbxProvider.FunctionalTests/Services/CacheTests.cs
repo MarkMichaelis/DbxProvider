@@ -1,5 +1,5 @@
 using DbxProvider.FunctionalTests.Infrastructure;
-using DbxProvider.Services;
+using IntelliTect.Dropbox;
 using Xunit;
 
 namespace DbxProvider.FunctionalTests.Services;
@@ -323,7 +323,7 @@ public class CacheTests : IDisposable
             await cache.GetChildrenAsync(folder);
 
             // Simulate provider's write-through after a local mutation.
-            var item = new DbxProvider.Models.DropboxItem
+            var item = new IntelliTect.Dropbox.DropboxItem
             {
                 Name = "local-add.txt",
                 Path = $"{folder}/local-add.txt",

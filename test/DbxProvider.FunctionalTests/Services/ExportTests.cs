@@ -1,5 +1,5 @@
 using DbxProvider.FunctionalTests.Infrastructure;
-using DbxProvider.Models;
+using IntelliTect.Dropbox;
 using Xunit;
 
 namespace DbxProvider.FunctionalTests.Services;

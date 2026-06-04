@@ -1,5 +1,5 @@
 using System.Management.Automation;
-using Dbx.Core.Wildcards;
+using IntelliTect.Dropbox;
 using Xunit;
 
 namespace DbxProvider.UnitTests;

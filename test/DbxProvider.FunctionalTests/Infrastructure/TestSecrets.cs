@@ -1,4 +1,4 @@
-using DbxProvider.Services;
+using IntelliTect.Dropbox;
 using Microsoft.Extensions.Configuration;
 
 namespace DbxProvider.FunctionalTests.Infrastructure;

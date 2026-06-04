@@ -1,6 +1,6 @@
 using System;
 using System.Management.Automation;
-using DbxProvider.Models;
+using IntelliTect.Dropbox;
 
 namespace DbxProvider.Cmdlets
 {

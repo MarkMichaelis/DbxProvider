@@ -5,7 +5,7 @@
     <View>
       <Name>DropboxItem</Name>
       <ViewSelectedBy>
-        <TypeName>DbxProvider.Models.DropboxItem</TypeName>
+        <TypeName>IntelliTect.Dropbox.DropboxItem</TypeName>
       </ViewSelectedBy>
       <TableControl>
         <TableHeaders>
@@ -51,7 +51,7 @@
     <View>
       <Name>DropboxItemList</Name>
       <ViewSelectedBy>
-        <TypeName>DbxProvider.Models.DropboxItem</TypeName>
+        <TypeName>IntelliTect.Dropbox.DropboxItem</TypeName>
       </ViewSelectedBy>
       <ListControl>
         <ListEntries>
@@ -79,7 +79,7 @@
     <View>
       <Name>DropboxRevision</Name>
       <ViewSelectedBy>
-        <TypeName>DbxProvider.Models.DropboxRevision</TypeName>
+        <TypeName>IntelliTect.Dropbox.DropboxRevision</TypeName>
       </ViewSelectedBy>
       <TableControl>
         <TableHeaders>
@@ -107,7 +107,7 @@
     <View>
       <Name>DropboxSharedLink</Name>
       <ViewSelectedBy>
-        <TypeName>DbxProvider.Models.DropboxSharedLink</TypeName>
+        <TypeName>IntelliTect.Dropbox.DropboxSharedLink</TypeName>
       </ViewSelectedBy>
       <TableControl>
         <TableHeaders>
@@ -131,7 +131,7 @@
     <View>
       <Name>DropboxSharedFolder</Name>
       <ViewSelectedBy>
-        <TypeName>DbxProvider.Models.DropboxSharedFolder</TypeName>
+        <TypeName>IntelliTect.Dropbox.DropboxSharedFolder</TypeName>
       </ViewSelectedBy>
       <TableControl>
         <TableHeaders>
@@ -157,7 +157,7 @@
     <View>
       <Name>DropboxMember</Name>
       <ViewSelectedBy>
-        <TypeName>DbxProvider.Models.DropboxMember</TypeName>
+        <TypeName>IntelliTect.Dropbox.DropboxMember</TypeName>
       </ViewSelectedBy>
       <TableControl>
         <TableHeaders>
@@ -183,7 +183,7 @@
     <View>
       <Name>DropboxAccount</Name>
       <ViewSelectedBy>
-        <TypeName>DbxProvider.Models.DropboxAccount</TypeName>
+        <TypeName>IntelliTect.Dropbox.DropboxAccount</TypeName>
       </ViewSelectedBy>
       <ListControl>
         <ListEntries>
@@ -207,7 +207,7 @@
     <View>
       <Name>DropboxSpaceUsage</Name>
       <ViewSelectedBy>
-        <TypeName>DbxProvider.Models.DropboxSpaceUsage</TypeName>
+        <TypeName>IntelliTect.Dropbox.DropboxSpaceUsage</TypeName>
       </ViewSelectedBy>
       <ListControl>
         <ListEntries>
@@ -227,7 +227,7 @@
     <View>
       <Name>DropboxSearchResult</Name>
       <ViewSelectedBy>
-        <TypeName>DbxProvider.Models.DropboxSearchResult</TypeName>
+        <TypeName>IntelliTect.Dropbox.DropboxSearchResult</TypeName>
       </ViewSelectedBy>
       <TableControl>
         <TableHeaders>
@@ -253,7 +253,7 @@
     <View>
       <Name>DropboxTag</Name>
       <ViewSelectedBy>
-        <TypeName>DbxProvider.Models.DropboxTag</TypeName>
+        <TypeName>IntelliTect.Dropbox.DropboxTag</TypeName>
       </ViewSelectedBy>
       <TableControl>
         <TableHeaders>

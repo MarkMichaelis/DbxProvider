@@ -1,4 +1,4 @@
-using DbxProvider.Services;
+using IntelliTect.Dropbox;
 using Xunit;
 
 namespace DbxProvider.FunctionalTests.Infrastructure;

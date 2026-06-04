@@ -19,7 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Dbx.Core\Dbx.Core.csproj" />
+    <ProjectReference Include="..\..\src\IntelliTect.Dropbox.Core\IntelliTect.Dropbox.Core.csproj" />
   </ItemGroup>
 
 </Project>

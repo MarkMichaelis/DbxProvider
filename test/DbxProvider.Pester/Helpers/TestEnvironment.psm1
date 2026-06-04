@@ -53,12 +53,12 @@ function Get-DbxTestSecrets {
     $needMore = -not $secrets.AppKey -or -not $secrets.AppSecret -or -not $secrets.RefreshToken
     if ($needMore) {
         try {
-            if (-not ('DbxProvider.Services.CredentialStore' -as [type])) {
+            if (-not ('IntelliTect.Dropbox.CredentialStore' -as [type])) {
                 if (Test-Path $script:ModuleDllPath) {
                     Import-DbxProviderModule
                 }
             }
-            $storeType = 'DbxProvider.Services.CredentialStore' -as [type]
+            $storeType = 'IntelliTect.Dropbox.CredentialStore' -as [type]
             if ($storeType) {
                 $stored = $storeType::Load()
                 if ($stored) {

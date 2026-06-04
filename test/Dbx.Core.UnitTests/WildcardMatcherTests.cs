@@ -1,4 +1,4 @@
-using Dbx.Core.Wildcards;
+using IntelliTect.Dropbox;
 using FluentAssertions;
 using Xunit;
 

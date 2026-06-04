@@ -12,7 +12,7 @@ BeforeAll {
     Import-Module (Get-DbxProviderModulePath) -Force -DisableNameChecking -Global
 
     $expectedRoot = Join-Path $script:TempLocalAppData 'DbxProvider'
-    $actualPath   = [DbxProvider.Services.CredentialStore]::CredentialFilePath
+    $actualPath   = [IntelliTect.Dropbox.CredentialStore]::CredentialFilePath
     if (-not $actualPath.StartsWith($expectedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
         $env:LOCALAPPDATA = $script:OrigLocalAppData
         throw "Multi-account credential test sandbox redirect failed (path was '$actualPath')."
@@ -66,8 +66,8 @@ Describe 'Multi-account credential cmdlets' {
         # via accountId selector (the cmdlet preserves AccountId/Email when
         # merging — we set them here through the underlying API for test clarity).
         Set-DropboxCredential -Account 'dbid:aaa' -AppKey 'k1' -RefreshToken 'rt1'
-        [DbxProvider.Services.CredentialStore]::SaveAccount(
-            (New-Object DbxProvider.Services.StoredAccount -Property @{
+        [IntelliTect.Dropbox.CredentialStore]::SaveAccount(
+            (New-Object IntelliTect.Dropbox.StoredAccount -Property @{
                 AccountId = 'dbid:bbb'; Email = 'bob@example.com'; AppKey = 'k2'; RefreshToken = 'rt2'
             }), $false)
 
@@ -98,12 +98,12 @@ Describe 'Multi-account credential cmdlets' {
     }
 
     It 'Selector ambiguity (same email local-part) is reported as an error' {
-        [DbxProvider.Services.CredentialStore]::SaveAccount(
-            (New-Object DbxProvider.Services.StoredAccount -Property @{
+        [IntelliTect.Dropbox.CredentialStore]::SaveAccount(
+            (New-Object IntelliTect.Dropbox.StoredAccount -Property @{
                 AccountId = 'dbid:aaa'; Email = 'mark@one.com'; AppKey = 'k1'
             }), $false)
-        [DbxProvider.Services.CredentialStore]::SaveAccount(
-            (New-Object DbxProvider.Services.StoredAccount -Property @{
+        [IntelliTect.Dropbox.CredentialStore]::SaveAccount(
+            (New-Object IntelliTect.Dropbox.StoredAccount -Property @{
                 AccountId = 'dbid:bbb'; Email = 'mark@two.com'; AppKey = 'k2'
             }), $false)
 

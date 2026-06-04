@@ -1,8 +1,7 @@
 using System;
 using System.Linq;
 using System.Management.Automation;
-using DbxProvider.Models;
-using DbxProvider.Services;
+using IntelliTect.Dropbox;
 using Dropbox.Api.Files;
 
 namespace DbxProvider.Cmdlets

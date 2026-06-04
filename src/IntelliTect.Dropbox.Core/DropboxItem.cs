@@ -1,7 +1,7 @@
 using System;
 using System.Collections.ObjectModel;
 
-namespace DbxProvider.Models
+namespace IntelliTect.Dropbox
 {
     /// <summary>Represents a file or folder in Dropbox.</summary>
     public class DropboxItem

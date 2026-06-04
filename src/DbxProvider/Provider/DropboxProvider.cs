@@ -7,8 +7,7 @@ using System.Management.Automation;
 using System.Management.Automation.Provider;
 using System.Threading;
 using System.Threading.Tasks;
-using DbxProvider.Models;
-using DbxProvider.Services;
+using IntelliTect.Dropbox;
 
 namespace DbxProvider.Provider
 {
@@ -362,7 +361,7 @@ namespace DbxProvider.Provider
                 var dirOnly = dynParams?.Directory.IsPresent == true;
                 if (fileOnly && dirOnly) { fileOnly = dirOnly = false; }
 
-                bool ItemKindMatches(Models.DropboxItem item) =>
+                bool ItemKindMatches(DropboxItem item) =>
                     (!fileOnly || !item.IsFolder) && (!dirOnly || item.IsFolder);
 
                 // Route to search_v2 when scope is a subtree AND a wildcard/filter

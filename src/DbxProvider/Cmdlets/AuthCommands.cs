@@ -4,6 +4,7 @@ using System.Management.Automation;
 using System.Text;
 using DbxProvider.Provider;
 using DbxProvider.Services;
+using IntelliTect.Dropbox;
 using IntelliTect.Dropbox.Auth;
 
 namespace DbxProvider.Cmdlets
