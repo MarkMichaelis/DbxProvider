@@ -148,6 +148,39 @@ public sealed class LoopbackOAuthFlow
         _console.Info($"Waiting for authorization on {redirectUri} ...");
         _console.Info("(Press Ctrl+C to cancel.)");
 
+        return await WaitForOAuthRedirectAsync(listener, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Waits on a started <see cref="HttpListener"/> for the OAuth redirect,
+    /// skipping browser probe requests (favicon, preconnect) until one carries a
+    /// <c>?code=</c> or <c>?error=</c> payload.
+    ///
+    /// <para>
+    /// <see cref="HttpListener.GetContextAsync"/> does not observe a
+    /// <see cref="CancellationToken"/>, so this method registers a callback that
+    /// <see cref="HttpListener.Stop"/>s the listener when
+    /// <paramref name="ct"/> fires. The pending <c>GetContextAsync()</c> then
+    /// completes with a listener exception that is translated into an
+    /// <see cref="OperationCanceledException"/>, ensuring Ctrl+C cancels promptly
+    /// instead of hanging until an HTTP request arrives.
+    /// </para>
+    /// </summary>
+    /// <param name="listener">A listener that has already been started.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <exception cref="OperationCanceledException">When <paramref name="ct"/> is cancelled.</exception>
+    internal static async Task<OAuthCallback> WaitForOAuthRedirectAsync(
+        HttpListener listener, CancellationToken ct)
+    {
+        if (listener is null) throw new ArgumentNullException(nameof(listener));
+        ct.ThrowIfCancellationRequested();
+
+        using var registration = ct.Register(() =>
+        {
+            try { listener.Stop(); }
+            catch { /* listener already stopped or disposed */ }
+        });
+
         string? code = null;
         string? returnedState = null;
         string? errorParam = null;
@@ -156,19 +189,20 @@ public sealed class LoopbackOAuthFlow
         // OAuth redirect. Skip such requests until we see one carrying ?code= or ?error=.
         while (true)
         {
-            var contextTask = listener.GetContextAsync();
-            while (!contextTask.IsCompleted)
+            HttpListenerContext context;
+            try
             {
-                if (ct.IsCancellationRequested)
-                {
-                    listener.Stop();
-                    ct.ThrowIfCancellationRequested();
-                }
-                if (contextTask.Wait(TimeSpan.FromMilliseconds(150)))
-                    break;
+                context = await listener.GetContextAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ct.IsCancellationRequested &&
+                (ex is HttpListenerException || ex is ObjectDisposedException || ex is InvalidOperationException))
+            {
+                throw new OperationCanceledException(
+                    "OAuth authorization wait was cancelled.", ex, ct);
             }
 
-            var context = contextTask.Result;
+            ct.ThrowIfCancellationRequested();
+
             code = context.Request.QueryString["code"];
             returnedState = context.Request.QueryString["state"];
             errorParam = context.Request.QueryString["error"];
@@ -198,7 +232,6 @@ public sealed class LoopbackOAuthFlow
 
             if (hasOAuthPayload) break;
         }
-        listener.Stop();
 
         return new OAuthCallback(code, returnedState, errorParam);
     }
