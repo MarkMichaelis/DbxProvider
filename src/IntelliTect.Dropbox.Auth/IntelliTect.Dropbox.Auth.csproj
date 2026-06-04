@@ -5,14 +5,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
-    <RootNamespace>MarkMichaelis.Dropbox.Auth</RootNamespace>
-    <AssemblyName>MarkMichaelis.Dropbox.Auth</AssemblyName>
+    <RootNamespace>IntelliTect.Dropbox.Auth</RootNamespace>
+    <AssemblyName>IntelliTect.Dropbox.Auth</AssemblyName>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
   <!-- NuGet packaging metadata -->
   <PropertyGroup>
-    <PackageId>MarkMichaelis.Dropbox.Auth</PackageId>
+    <PackageId>IntelliTect.Dropbox.Auth</PackageId>
     <Version>0.1.0</Version>
     <Authors>MarkMichaelis</Authors>
     <Description>Reusable Dropbox OAuth onboarding: loopback PKCE flow, default-browser detection, and Playwright-driven app registration. Extracted from DbxProvider.</Description>

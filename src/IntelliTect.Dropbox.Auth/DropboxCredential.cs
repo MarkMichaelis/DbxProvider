@@ -1,4 +1,4 @@
-namespace MarkMichaelis.Dropbox.Auth;
+namespace IntelliTect.Dropbox.Auth;
 
 /// <summary>
 /// A Dropbox OAuth credential. <see cref="RefreshToken"/> is present after a

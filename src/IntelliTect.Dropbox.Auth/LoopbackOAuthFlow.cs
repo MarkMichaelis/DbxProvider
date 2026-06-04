@@ -7,7 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Dropbox.Api;
 
-namespace MarkMichaelis.Dropbox.Auth;
+namespace IntelliTect.Dropbox.Auth;
 
 /// <summary>
 /// The result of the loopback OAuth redirect: the authorization

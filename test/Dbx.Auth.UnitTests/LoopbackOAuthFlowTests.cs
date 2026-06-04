@@ -1,7 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using MarkMichaelis.Dropbox.Auth;
+using IntelliTect.Dropbox.Auth;
 using Xunit;
 
 namespace Dbx.Auth.UnitTests;
