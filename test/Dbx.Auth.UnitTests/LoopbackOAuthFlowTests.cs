@@ -1,4 +1,6 @@
 using System;
+using System.Net;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using IntelliTect.Dropbox.Auth;
@@ -96,5 +98,67 @@ public class LoopbackOAuthFlowTests
         var ex = await Assert.ThrowsAnyAsync<Exception>(
             () => flow.RunAsync("k", null, 52475, CancellationToken.None));
         Assert.Contains("access_denied", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task WaitForOAuthRedirectAsync_CancelledToken_ThrowsPromptly()
+    {
+        // The real loopback listener must unblock when the OAuth flow is cancelled
+        // (Ctrl+C). HttpListener.GetContextAsync() ignores the token, so the method
+        // must Stop() the listener on cancellation. Reverting that wiring makes this
+        // test hang past the 3s budget (a behavioral failure), proving the bug.
+        var port = GetFreeTcpPort();
+        using var listener = new HttpListener();
+        listener.Prefixes.Add($"http://localhost:{port}/");
+        listener.Start();
+
+        using var cts = new CancellationTokenSource();
+        var waitTask = LoopbackOAuthFlow.WaitForOAuthRedirectAsync(listener, cts.Token);
+
+        cts.CancelAfter(TimeSpan.FromMilliseconds(200));
+
+        var winner = await Task.WhenAny(waitTask, Task.Delay(TimeSpan.FromSeconds(3)));
+        Assert.True(ReferenceEquals(winner, waitTask),
+            "Listener wait did not unblock within 3s after cancellation (it hung).");
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waitTask);
+    }
+
+    [Fact]
+    public async Task RunAsync_CancelledToken_PropagatesCancellationThroughListenSeam()
+    {
+        // RunAsync must forward its token to the listen seam so a blocked listener
+        // surfaces cancellation instead of hanging.
+        var flow = new LoopbackOAuthFlow(
+            new RecordingConsole(),
+            listen: async (authorizeUri, redirectUri, expectedState, ct) =>
+            {
+                await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
+                return new OAuthCallback("code", expectedState, null);
+            },
+            exchange: (code, appKey, appSecret, redirectUri, verifier, ct) =>
+                Task.FromResult(new DropboxCredential(appKey, appSecret, "r", null)));
+
+        using var cts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromMilliseconds(200));
+
+        var runTask = flow.RunAsync("k", null, 52475, cts.Token);
+        var winner = await Task.WhenAny(runTask, Task.Delay(TimeSpan.FromSeconds(3)));
+        Assert.True(ReferenceEquals(winner, runTask),
+            "RunAsync did not unblock within 3s after cancellation (it hung).");
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runTask);
+    }
+
+    private static int GetFreeTcpPort()
+    {
+        var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        try
+        {
+            return ((IPEndPoint)probe.LocalEndpoint).Port;
+        }
+        finally
+        {
+            probe.Stop();
+        }
     }
 }
