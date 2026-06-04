@@ -161,8 +161,9 @@ namespace DbxProvider.Provider
 
         private DropboxServiceClient GetService()
         {
-            if (PSDriveInfo is DropboxDriveInfo dbx)
-                return dbx.Service;
+            var drive = ResolveDriveInfo();
+            if (drive != null)
+                return drive.Service;
 
             throw new InvalidOperationException(
                 "No Dropbox drive found. Use New-PSDrive or Connect-Dropbox first.");
@@ -170,7 +171,49 @@ namespace DbxProvider.Provider
 
         private MetadataCache? GetCache()
         {
-            return (PSDriveInfo as DropboxDriveInfo)?.Cache;
+            return ResolveDriveInfo()?.Cache;
+        }
+
+        /// <summary>
+        /// Resolves the active <see cref="DropboxDriveInfo"/> for the current
+        /// operation. Prefers the operation's <see cref="CmdletProvider.PSDriveInfo"/>,
+        /// but falls back to the provider's registered drives when it is null.
+        /// PowerShell supplies a null <c>PSDriveInfo</c> when resolving a
+        /// provider-qualified path (e.g. an item's <c>PSPath</c>,
+        /// <c>DbxProvider\Dropbox::Foo</c>); without this fallback such paths
+        /// resolve against no drive and silently return nothing. This mirrors how
+        /// the built-in FileSystem/Registry providers resolve their backing store
+        /// from the path/registered drives rather than relying on the drive
+        /// context alone.
+        /// </summary>
+        private DropboxDriveInfo? ResolveDriveInfo()
+        {
+            if (PSDriveInfo is DropboxDriveInfo current)
+                return current;
+
+            var drives = ProviderInfo?.Drives;
+            if (drives == null)
+                return null;
+
+            DropboxDriveInfo? firstDbx = null;
+            int dbxCount = 0;
+            foreach (var d in drives)
+            {
+                if (d is DropboxDriveInfo dbx)
+                {
+                    firstDbx ??= dbx;
+                    dbxCount++;
+                }
+            }
+
+            // With exactly one Dropbox drive (the common single-account case) the
+            // mapping is unambiguous. With several drives a provider-qualified
+            // path has lost the drive name, so the first registered Dropbox drive
+            // is the best available match.
+            if (dbxCount > 1)
+                WriteVerbose("Resolving a drive-less Dropbox path against the first of "
+                    + dbxCount + " registered Dropbox drives.");
+            return firstDbx;
         }
 
         private static string ToDropboxPath(string providerPath)

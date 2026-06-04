@@ -83,7 +83,7 @@ namespace IntelliTect.Dropbox
 
         #region Files - List / Get Metadata
 
-        public Task<List<DropboxItem>> ListFolderAsync(string path, bool recursive = false, bool includeDeleted = false, CancellationToken cancellationToken = default) =>
+        public virtual Task<List<DropboxItem>> ListFolderAsync(string path, bool recursive = false, bool includeDeleted = false, CancellationToken cancellationToken = default) =>
             RetryAsync(_ => ListFolderCoreAsync(path, recursive, includeDeleted), cancellationToken);
 
         private async Task<List<DropboxItem>> ListFolderCoreAsync(string path, bool recursive = false, bool includeDeleted = false)
@@ -174,7 +174,7 @@ namespace IntelliTect.Dropbox
             return delta;
         }
 
-        public Task<DropboxItem> GetMetadataAsync(string path, bool includeDeleted = false, CancellationToken cancellationToken = default) =>
+        public virtual Task<DropboxItem> GetMetadataAsync(string path, bool includeDeleted = false, CancellationToken cancellationToken = default) =>
             RetryAsync(_ => GetMetadataCoreAsync(path, includeDeleted), cancellationToken);
 
         private async Task<DropboxItem> GetMetadataCoreAsync(string path, bool includeDeleted = false)
@@ -187,7 +187,7 @@ namespace IntelliTect.Dropbox
             return MapMetadataToItem(metadata);
         }
 
-        public Task<bool> ItemExistsAsync(string path, CancellationToken cancellationToken = default) =>
+        public virtual Task<bool> ItemExistsAsync(string path, CancellationToken cancellationToken = default) =>
             RetryAsync(_ => ItemExistsCoreAsync(path), cancellationToken);
 
         private async Task<bool> ItemExistsCoreAsync(string path)
@@ -778,7 +778,7 @@ namespace IntelliTect.Dropbox
 
         #region Users
 
-        public Task<DropboxAccount> GetCurrentAccountAsync(CancellationToken cancellationToken = default) =>
+        public virtual Task<DropboxAccount> GetCurrentAccountAsync(CancellationToken cancellationToken = default) =>
             RetryAsync(_ => GetCurrentAccountCoreAsync(), cancellationToken);
 
         private async Task<DropboxAccount> GetCurrentAccountCoreAsync()
