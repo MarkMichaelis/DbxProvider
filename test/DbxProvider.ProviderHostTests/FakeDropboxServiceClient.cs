@@ -24,15 +24,18 @@ public class FakeDropboxServiceClient : DropboxServiceClient
     private string _fullCursor = "cursor-full-0";
 
     /// <summary>Records every <see cref="UploadAsync"/> call in order, capturing
-    /// the normalized path and the byte length of the uploaded stream. Tests use
-    /// this to assert how many server revisions a single cmdlet produced.</summary>
+    /// the normalized path and the exact bytes uploaded. Tests use this to assert
+    /// how many server revisions a single cmdlet produced and what they contained.</summary>
     public List<UploadRecord> Uploads { get; } = new();
 
-    /// <summary>A single recorded upload: the normalized path and the number of
-    /// bytes uploaded, or <c>-1</c> when the uploaded stream was not seekable (the
-    /// provider always uploads seekable <see cref="System.IO.MemoryStream"/>s, so in
-    /// practice this is the real byte count).</summary>
-    public sealed record UploadRecord(string Path, long Length);
+    /// <summary>A single recorded upload: the normalized path, the exact payload
+    /// bytes that were uploaded (captured from the stream's current position to its
+    /// end, mirroring what the real client would send), and that payload's length.</summary>
+    public sealed record UploadRecord(string Path, byte[] Content)
+    {
+        /// <summary>Number of bytes uploaded.</summary>
+        public long Length => Content.Length;
+    }
 
     public FakeDropboxServiceClient(IEnumerable<DropboxItem> items)
         : base((Dropbox.Api.DropboxClient)null!)
@@ -79,8 +82,10 @@ public class FakeDropboxServiceClient : DropboxServiceClient
     public override Task<DropboxItem> UploadAsync(string path, System.IO.Stream content, WriteMode? mode = null, CancellationToken cancellationToken = default)
     {
         var norm = NormalizePath(path);
-        long length = content.CanSeek ? content.Length : -1;
-        Uploads.Add(new UploadRecord(norm, length));
+        using var captured = new System.IO.MemoryStream();
+        content.CopyTo(captured); // copies from the stream's current position, as the real upload would
+        var bytes = captured.ToArray();
+        Uploads.Add(new UploadRecord(norm, bytes));
 
         var item = new DropboxItem
         {
@@ -88,7 +93,7 @@ public class FakeDropboxServiceClient : DropboxServiceClient
             Path = norm,
             IsFolder = false,
             Id = "id:" + norm,
-            Length = length < 0 ? 0 : (ulong)length,
+            Length = (ulong)bytes.Length,
         };
         _items.RemoveAll(i => i.Path == norm);
         _items.Add(item);
