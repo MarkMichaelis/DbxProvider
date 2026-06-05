@@ -9,8 +9,11 @@ namespace DbxProvider.ProviderHostTests;
 
 /// <summary>
 /// In-memory <see cref="DropboxServiceClient"/> used to drive the PowerShell
-/// provider in-process without touching the Dropbox API. Only the read-path
-/// methods exercised by <c>Get-ChildItem</c>/<c>Get-Item</c> are overridden.
+/// provider in-process without touching the Dropbox API. The read-path methods
+/// exercised by <c>Get-ChildItem</c>/<c>Get-Item</c> are overridden, and
+/// <see cref="UploadAsync"/> is overridden to record every upload (see
+/// <see cref="Uploads"/>) so tests can assert how many server revisions a single
+/// content cmdlet produces.
 /// </summary>
 public class FakeDropboxServiceClient : DropboxServiceClient
 {
@@ -26,7 +29,9 @@ public class FakeDropboxServiceClient : DropboxServiceClient
     public List<UploadRecord> Uploads { get; } = new();
 
     /// <summary>A single recorded upload: the normalized path and the number of
-    /// bytes written to the server.</summary>
+    /// bytes uploaded, or <c>-1</c> when the uploaded stream was not seekable (the
+    /// provider always uploads seekable <see cref="System.IO.MemoryStream"/>s, so in
+    /// practice this is the real byte count).</summary>
     public sealed record UploadRecord(string Path, long Length);
 
     public FakeDropboxServiceClient(IEnumerable<DropboxItem> items)
