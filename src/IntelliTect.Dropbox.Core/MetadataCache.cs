@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -8,6 +9,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Data.Sqlite;
 
 namespace IntelliTect.Dropbox
 {
@@ -22,10 +24,15 @@ namespace IntelliTect.Dropbox
     /// snapshot, and return — typically a single fast round-trip when nothing
     /// has changed.
     ///
-    /// Entries are persisted to JSON under
-    /// <c>%LOCALAPPDATA%\DbxProvider\cache\&lt;accountIdHash&gt;</c>; the cache
-    /// is hydrated from disk on construction so the warm-path survives
-    /// process restarts.
+    /// Entries are persisted to a single-file SQLite database under
+    /// <c>%LOCALAPPDATA%\DbxProvider\cache\&lt;accountIdHash&gt;\metadata.db</c>.
+    /// The persistent store is <b>unbounded</b> — nothing is ever evicted from
+    /// disk. Entries are hydrated lazily (per path, on demand) so startup never
+    /// pays to read the whole store. A bounded in-memory working set keeps the
+    /// hot paths resident; when it is exceeded the least-recently-used entries
+    /// are flushed to the database and dropped from memory only — they are
+    /// re-loaded transparently on the next access. Dropbox always remains the
+    /// master: every served result is reconciled against the stored cursor.
     /// </summary>
     public sealed class MetadataCache : IDisposable
     {
@@ -40,14 +47,32 @@ namespace IntelliTect.Dropbox
             public bool Dirty { get; set; }
         }
 
+        /// <summary>
+        /// Lightweight, items-free projection of a cache entry for observability
+        /// (e.g. <c>Get-DropboxCacheInfo</c>). Reading this from the database
+        /// avoids deserializing every entry's full item list.
+        /// </summary>
+        public sealed class EntryInfo
+        {
+            public string Path { get; set; } = "";
+            public int ItemCount { get; set; }
+            public string Cursor { get; set; } = "";
+            public DateTime LastValidatedUtc { get; set; }
+            public DateTime LastUsedUtc { get; set; }
+            public bool Dirty { get; set; }
+            public bool InMemory { get; set; }
+        }
+
         private readonly DropboxServiceClient _service;
         private readonly CacheOptions _options;
         private readonly string _accountId;
         private readonly string _accountIdHash;
         private readonly string _accountDir;
+        private readonly string _dbPath;
         private readonly ConcurrentDictionary<string, Entry> _entries =
             new(StringComparer.OrdinalIgnoreCase);
         private readonly object _diskLock = new();
+        private readonly SqliteConnection _db;
         private readonly Timer? _flushTimer;
         private bool _disposed;
 
@@ -66,8 +91,9 @@ namespace IntelliTect.Dropbox
 
             _accountIdHash = HashString(_accountId);
             _accountDir = Path.Combine(_options.EffectiveRootDirectory, _accountIdHash);
+            _dbPath = Path.Combine(_accountDir, "metadata.db");
 
-            HydrateFromDisk();
+            _db = OpenDatabase();
 
             if (_options.FlushIntervalSeconds > 0)
             {
@@ -80,8 +106,74 @@ namespace IntelliTect.Dropbox
         public string AccountId => _accountId;
         public string AccountIdHash => _accountIdHash;
         public string AccountDirectory => _accountDir;
+        public string DatabasePath => _dbPath;
+
+        /// <summary>Number of entries currently resident in memory.</summary>
         public int Count => _entries.Count;
+
+        /// <summary>Total number of entries persisted to the database (the
+        /// authoritative, unbounded cache size).</summary>
+        public int PersistedCount()
+        {
+            lock (_diskLock)
+            {
+                using var cmd = _db.CreateCommand();
+                cmd.CommandText = "SELECT COUNT(*) FROM entries;";
+                var result = cmd.ExecuteScalar();
+                return Convert.ToInt32(result, CultureInfo.InvariantCulture);
+            }
+        }
+
+        /// <summary>In-memory snapshot (resident entries only).</summary>
         public IReadOnlyCollection<Entry> Snapshot() => _entries.Values.ToArray();
+
+        /// <summary>
+        /// Full observability snapshot: every persisted entry (read cheaply
+        /// from the database, without its item list) overlaid with the current
+        /// in-memory state for resident entries.
+        /// </summary>
+        public IReadOnlyCollection<EntryInfo> SnapshotInfo()
+        {
+            var byKey = new Dictionary<string, EntryInfo>(StringComparer.OrdinalIgnoreCase);
+
+            lock (_diskLock)
+            {
+                using var cmd = _db.CreateCommand();
+                cmd.CommandText =
+                    "SELECT path_lower, path, cursor, item_count, last_validated_utc, last_used_utc FROM entries;";
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    var key = reader.GetString(0);
+                    byKey[key] = new EntryInfo
+                    {
+                        Path = reader.GetString(1),
+                        Cursor = reader.GetString(2),
+                        ItemCount = reader.GetInt32(3),
+                        LastValidatedUtc = ParseUtc(reader.GetString(4)),
+                        LastUsedUtc = ParseUtc(reader.GetString(5)),
+                        Dirty = false,
+                        InMemory = false
+                    };
+                }
+            }
+
+            foreach (var entry in _entries.Values)
+            {
+                byKey[entry.PathLower] = new EntryInfo
+                {
+                    Path = entry.Path,
+                    Cursor = entry.Cursor,
+                    ItemCount = entry.Items.Count,
+                    LastValidatedUtc = entry.LastValidatedUtc,
+                    LastUsedUtc = entry.LastUsedUtc,
+                    Dirty = entry.Dirty,
+                    InMemory = true
+                };
+            }
+
+            return byKey.Values.ToArray();
+        }
 
         /// <summary>
         /// Returns the cached child items for <paramref name="path"/>,
@@ -109,6 +201,16 @@ namespace IntelliTect.Dropbox
                 return entry.Items.ToList();
             }
 
+            // Warm hydrate: the path is not resident but may be persisted.
+            if (TryLoadFromDisk(key, out var loaded) && loaded != null)
+            {
+                _entries[key] = loaded;
+                await ValidateAsync(loaded, cancellationToken);
+                loaded.LastUsedUtc = DateTime.UtcNow;
+                EvictIfOverBudget();
+                return loaded.Items.ToList();
+            }
+
             // Cold miss: full enumeration.
             var (items, cursor) = await _service.ListFolderWithCursorAsync(path, cancellationToken: cancellationToken);
             entry = new Entry
@@ -122,22 +224,38 @@ namespace IntelliTect.Dropbox
                 Dirty = true
             };
             _entries[key] = entry;
-            EvictIfOverCapacity();
+            EvictIfOverBudget();
             return entry.Items.ToList();
         }
 
-        /// <summary>Returns the cached entry for <paramref name="path"/> without validating.</summary>
+        /// <summary>Returns the cached entry for <paramref name="path"/> without
+        /// validating, hydrating it from the database if necessary.</summary>
         public bool TryGet(string path, out Entry? entry)
         {
-            return _entries.TryGetValue(MakeKey(path), out entry);
+            entry = null;
+            if (!_options.Enabled) return false;
+
+            var key = MakeKey(path);
+            if (_entries.TryGetValue(key, out entry)) return true;
+
+            if (TryLoadFromDisk(key, out var loaded) && loaded != null)
+            {
+                _entries[key] = loaded;
+                EvictIfOverBudget();
+                entry = loaded;
+                return true;
+            }
+
+            entry = null;
+            return false;
         }
 
-        /// <summary>Eagerly run validate-and-merge for a path (or all paths if null).</summary>
+        /// <summary>Eagerly run validate-and-merge for a path (or all resident paths if null).</summary>
         public async Task UpdateAsync(string? path = null, CancellationToken cancellationToken = default)
         {
             if (path != null)
             {
-                if (_entries.TryGetValue(MakeKey(path), out var e))
+                if (TryGet(path, out var e) && e != null)
                     await ValidateAsync(e, cancellationToken);
                 return;
             }
@@ -145,7 +263,7 @@ namespace IntelliTect.Dropbox
                 await ValidateAsync(e, cancellationToken);
         }
 
-        /// <summary>Drop a path's entry (or all entries if null).</summary>
+        /// <summary>Drop a path's entry (or all entries if null) from memory and disk.</summary>
         public void Clear(string? path = null)
         {
             if (path == null)
@@ -153,21 +271,16 @@ namespace IntelliTect.Dropbox
                 _entries.Clear();
                 lock (_diskLock)
                 {
-                    if (Directory.Exists(_accountDir))
-                    {
-                        try { Directory.Delete(_accountDir, recursive: true); } catch { /* best effort */ }
-                    }
+                    using var cmd = _db.CreateCommand();
+                    cmd.CommandText = "DELETE FROM entries;";
+                    cmd.ExecuteNonQuery();
                 }
                 return;
             }
 
             var key = MakeKey(path);
             _entries.TryRemove(key, out _);
-            lock (_diskLock)
-            {
-                var file = Path.Combine(_accountDir, HashString(key) + ".json");
-                if (File.Exists(file)) try { File.Delete(file); } catch { }
-            }
+            DeleteRow(key);
         }
 
         // ----- write-through ---------------------------------------------------
@@ -181,11 +294,7 @@ namespace IntelliTect.Dropbox
             if (parent == null) return;
             var key = MakeKey(parent);
             _entries.TryRemove(key, out _);
-            lock (_diskLock)
-            {
-                var file = Path.Combine(_accountDir, HashString(key) + ".json");
-                if (File.Exists(file)) try { File.Delete(file); } catch { }
-            }
+            DeleteRow(key);
         }
 
         /// <summary>
@@ -258,66 +367,156 @@ namespace IntelliTect.Dropbox
             entry.Items.Add(item);
         }
 
-        private void EvictIfOverCapacity()
+        /// <summary>
+        /// Keep the in-memory working set within budget. Victims are flushed to
+        /// the database first (so nothing is lost) and then dropped from memory;
+        /// they re-hydrate on next access. The persistent cache is never capped.
+        /// </summary>
+        private void EvictIfOverBudget()
         {
-            if (_entries.Count <= _options.MaxEntries) return;
+            var budget = _options.MaxInMemoryEntries;
+            if (budget <= 0 || _entries.Count <= budget) return;
+
             var victims = _entries.Values
                 .OrderBy(e => e.LastUsedUtc)
-                .Take(_entries.Count - _options.MaxEntries)
+                .Take(_entries.Count - budget)
                 .ToList();
+
             foreach (var v in victims)
             {
+                if (v.Dirty) PersistEntry(v);
                 _entries.TryRemove(v.PathLower, out _);
-                lock (_diskLock)
-                {
-                    var file = Path.Combine(_accountDir, HashString(v.PathLower) + ".json");
-                    if (File.Exists(file)) try { File.Delete(file); } catch { }
-                }
             }
         }
 
-        // ----- disk persistence ----------------------------------------------
+        // ----- disk persistence (SQLite) -------------------------------------
 
-        private void HydrateFromDisk()
+        private SqliteConnection OpenDatabase()
         {
-            try
+            Directory.CreateDirectory(_accountDir);
+            var connectionString = new SqliteConnectionStringBuilder
             {
-                if (!Directory.Exists(_accountDir)) return;
-                foreach (var file in Directory.EnumerateFiles(_accountDir, "*.json"))
-                {
-                    try
-                    {
-                        var json = File.ReadAllText(file);
-                        var entry = JsonSerializer.Deserialize<Entry>(json, JsonOpts);
-                        if (entry == null || string.IsNullOrEmpty(entry.PathLower)) continue;
-                        entry.Dirty = false;
-                        _entries[entry.PathLower] = entry;
-                    }
-                    catch { /* skip corrupt files */ }
-                }
+                DataSource = _dbPath,
+                Pooling = false
+            }.ToString();
+
+            var connection = new SqliteConnection(connectionString);
+            connection.Open();
+
+            using (var pragma = connection.CreateCommand())
+            {
+                pragma.CommandText =
+                    "PRAGMA journal_mode=WAL;" +
+                    "PRAGMA synchronous=NORMAL;" +
+                    "CREATE TABLE IF NOT EXISTS entries (" +
+                    "  path_lower TEXT PRIMARY KEY," +
+                    "  path TEXT NOT NULL," +
+                    "  cursor TEXT NOT NULL," +
+                    "  items_json TEXT NOT NULL," +
+                    "  item_count INTEGER NOT NULL," +
+                    "  last_validated_utc TEXT NOT NULL," +
+                    "  last_used_utc TEXT NOT NULL" +
+                    ");";
+                pragma.ExecuteNonQuery();
             }
-            catch { /* best effort */ }
+
+            return connection;
         }
 
+        private bool TryLoadFromDisk(string key, out Entry? entry)
+        {
+            entry = null;
+            lock (_diskLock)
+            {
+                using var cmd = _db.CreateCommand();
+                cmd.CommandText =
+                    "SELECT path, cursor, items_json, last_validated_utc, last_used_utc " +
+                    "FROM entries WHERE path_lower = $k;";
+                cmd.Parameters.AddWithValue("$k", key);
+
+                using var reader = cmd.ExecuteReader();
+                if (!reader.Read()) return false;
+
+                List<DropboxItem> items;
+                try
+                {
+                    items = JsonSerializer.Deserialize<List<DropboxItem>>(reader.GetString(2), JsonOpts)
+                            ?? new List<DropboxItem>();
+                }
+                catch
+                {
+                    return false; // skip corrupt row
+                }
+
+                entry = new Entry
+                {
+                    Path = reader.GetString(0),
+                    PathLower = key,
+                    Cursor = reader.GetString(1),
+                    Items = items,
+                    LastValidatedUtc = ParseUtc(reader.GetString(3)),
+                    LastUsedUtc = ParseUtc(reader.GetString(4)),
+                    Dirty = false
+                };
+                return true;
+            }
+        }
+
+        private void PersistEntry(Entry entry)
+        {
+            lock (_diskLock)
+            {
+                UpsertEntry(entry);
+                entry.Dirty = false;
+            }
+        }
+
+        private void UpsertEntry(Entry entry)
+        {
+            using var cmd = _db.CreateCommand();
+            cmd.CommandText =
+                "INSERT INTO entries (path_lower, path, cursor, items_json, item_count, last_validated_utc, last_used_utc) " +
+                "VALUES ($k, $p, $c, $j, $n, $lv, $lu) " +
+                "ON CONFLICT(path_lower) DO UPDATE SET " +
+                "  path=excluded.path, cursor=excluded.cursor, items_json=excluded.items_json, " +
+                "  item_count=excluded.item_count, last_validated_utc=excluded.last_validated_utc, " +
+                "  last_used_utc=excluded.last_used_utc;";
+            cmd.Parameters.AddWithValue("$k", entry.PathLower);
+            cmd.Parameters.AddWithValue("$p", entry.Path);
+            cmd.Parameters.AddWithValue("$c", entry.Cursor ?? "");
+            cmd.Parameters.AddWithValue("$j", JsonSerializer.Serialize(entry.Items, JsonOpts));
+            cmd.Parameters.AddWithValue("$n", entry.Items.Count);
+            cmd.Parameters.AddWithValue("$lv", FormatUtc(entry.LastValidatedUtc));
+            cmd.Parameters.AddWithValue("$lu", FormatUtc(entry.LastUsedUtc));
+            cmd.ExecuteNonQuery();
+        }
+
+        private void DeleteRow(string key)
+        {
+            lock (_diskLock)
+            {
+                using var cmd = _db.CreateCommand();
+                cmd.CommandText = "DELETE FROM entries WHERE path_lower = $k;";
+                cmd.Parameters.AddWithValue("$k", key);
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        /// <summary>Persist all dirty resident entries to the database.</summary>
         public void Flush()
         {
             lock (_diskLock)
             {
-                try { Directory.CreateDirectory(_accountDir); }
-                catch { return; }
+                var dirty = _entries.Values.Where(e => e.Dirty).ToList();
+                if (dirty.Count == 0) return;
 
-                foreach (var entry in _entries.Values)
+                using var tx = _db.BeginTransaction();
+                foreach (var entry in dirty)
                 {
-                    if (!entry.Dirty) continue;
-                    try
-                    {
-                        var file = Path.Combine(_accountDir, HashString(entry.PathLower) + ".json");
-                        var json = JsonSerializer.Serialize(entry, JsonOpts);
-                        File.WriteAllText(file, json);
-                        entry.Dirty = false;
-                    }
-                    catch { /* best effort */ }
+                    UpsertEntry(entry);
+                    entry.Dirty = false;
                 }
+                tx.Commit();
             }
         }
 
@@ -332,6 +531,7 @@ namespace IntelliTect.Dropbox
             _disposed = true;
             try { _flushTimer?.Dispose(); } catch { }
             try { Flush(); } catch { }
+            try { _db.Dispose(); } catch { }
         }
 
         // ----- helpers --------------------------------------------------------
@@ -350,6 +550,15 @@ namespace IntelliTect.Dropbox
             if (idx <= 0) return "";
             return norm.Substring(0, idx);
         }
+
+        private static string FormatUtc(DateTime value) =>
+            value.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture);
+
+        private static DateTime ParseUtc(string value) =>
+            DateTime.TryParse(value, CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind, out var dt)
+                ? dt
+                : DateTime.MinValue;
 
         private static string HashString(string input)
         {

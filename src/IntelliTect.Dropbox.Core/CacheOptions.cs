@@ -14,8 +14,14 @@ namespace IntelliTect.Dropbox
         /// goes through to the Dropbox API.</summary>
         public bool Enabled { get; set; } = true;
 
-        /// <summary>Soft cap on in-memory entries; LRU eviction when exceeded.</summary>
-        public int MaxEntries { get; set; } = 10_000;
+        /// <summary>
+        /// Soft budget on how many entries stay resident in memory. The
+        /// persistent cache (the on-disk SQLite database) is never capped; when
+        /// this budget is exceeded the least-recently-used entries are flushed
+        /// to disk and dropped from memory only, then re-hydrated on demand.
+        /// Set to 0 to keep every loaded entry resident (no spilling).
+        /// </summary>
+        public int MaxInMemoryEntries { get; set; } = 50_000;
 
         /// <summary>Background disk-flush cadence. Set to 0 to disable.</summary>
         public int FlushIntervalSeconds { get; set; } = 5;
