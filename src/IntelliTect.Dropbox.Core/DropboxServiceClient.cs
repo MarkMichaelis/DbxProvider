@@ -98,7 +98,7 @@ namespace IntelliTect.Dropbox
         /// validate freshness on subsequent reads via
         /// <see cref="ListFolderContinueRawAsync"/>.
         /// </summary>
-        public Task<(List<DropboxItem> Items, string Cursor)> ListFolderWithCursorAsync(string path, bool recursive = false, bool includeDeleted = false, CancellationToken cancellationToken = default) =>
+        public virtual Task<(List<DropboxItem> Items, string Cursor)> ListFolderWithCursorAsync(string path, bool recursive = false, bool includeDeleted = false, CancellationToken cancellationToken = default) =>
             RetryAsync(_ => ListFolderWithCursorCoreAsync(path, recursive, includeDeleted), cancellationToken);
 
         private async Task<(List<DropboxItem> Items, string Cursor)> ListFolderWithCursorCoreAsync(string path, bool recursive = false, bool includeDeleted = false)
@@ -137,7 +137,7 @@ namespace IntelliTect.Dropbox
         /// adds+removes since the cursor. Detects cursor invalidation and
         /// signals it via <see cref="ListFolderDelta.ResetRequired"/>.
         /// </summary>
-        public Task<ListFolderDelta> ListFolderContinueRawAsync(string cursor, CancellationToken cancellationToken = default) =>
+        public virtual Task<ListFolderDelta> ListFolderContinueRawAsync(string cursor, CancellationToken cancellationToken = default) =>
             RetryAsync(_ => ListFolderContinueRawCoreAsync(cursor), cancellationToken);
 
         private async Task<ListFolderDelta> ListFolderContinueRawCoreAsync(string cursor)
