@@ -9,13 +9,13 @@ schema: 2.0.0
 
 ## SYNOPSIS
 
-Tunes the metadata cache at runtime: enable/disable, max entries,
+Tunes the metadata cache at runtime: enable/disable, in-memory budget,
 flush cadence.
 
 ## SYNTAX
 
 ```
-Set-DropboxCacheOption [-Disable] [-Enable] [-MaxEntries <Int32>] [-FlushIntervalSeconds <Int32>]
+Set-DropboxCacheOption [-Disable] [-Enable] [-MaxInMemoryEntries <Int32>] [-FlushIntervalSeconds <Int32>]
  [-DriveName <String>] [-ProgressAction <ActionPreference>] [<CommonParameters>]
 ```
 
@@ -37,10 +37,11 @@ Bypass the cache. Every `Get-ChildItem` performs a full enumeration.
 
 ### Example 2
 ```powershell
-PS> Set-DropboxCacheOption -MaxEntries 5000 -FlushIntervalSeconds 10
+PS> Set-DropboxCacheOption -MaxInMemoryEntries 100000 -FlushIntervalSeconds 10
 ```
 
-Lower the cap and slow the disk flush cadence.
+Raise the in-memory working-set budget and slow the disk flush cadence.
+The on-disk SQLite cache itself is never capped.
 
 ## PARAMETERS
 
@@ -108,9 +109,13 @@ Accept pipeline input: False
 Accept wildcard characters: False
 ```
 
-### -MaxEntries
+### -MaxInMemoryEntries
 
-Soft cap on cached folders before LRU eviction kicks in.
+Soft budget on how many entries stay resident in memory. The persistent
+on-disk SQLite cache is never capped; when this budget is exceeded the
+least-recently-used entries are flushed to disk and dropped from memory
+only, then re-hydrated on demand. Set to `0` to keep every loaded entry
+resident.
 
 ```yaml
 Type: Int32

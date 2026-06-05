@@ -52,4 +52,18 @@
           WorkingDirectory="$(MSBuildThisFileDirectory)..\.." />
   </Target>
 
+  <!-- PowerShell loads this binary module in its own AssemblyLoadContext, which
+       does not probe the per-RID runtimes/<rid>/native folder for native
+       dependencies. Copy the host-RID SQLite engine (used by the metadata
+       cache) next to the managed assemblies so SQLitePCLRaw can P/Invoke it. -->
+  <Target Name="CopySqliteNativeToOutput" AfterTargets="Build">
+    <ItemGroup>
+      <_DbxSqliteNative Include="$(OutDir)runtimes\$(NETCoreSdkRuntimeIdentifier)\native\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_DbxSqliteNative)"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true"
+          Condition="'@(_DbxSqliteNative)' != ''" />
+  </Target>
+
 </Project>

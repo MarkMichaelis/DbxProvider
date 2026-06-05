@@ -247,10 +247,10 @@ public class CacheTests : IDisposable
     }
 
     [SkippableFact]
-    public async Task Cache_LRUEviction()
+    public async Task Cache_OverBudget_SpillsToDiskWithoutLoss()
     {
         TestSkip.IfUnavailable(_fixture);
-        var root = await NewTestFolderWithRetryAsync(nameof(Cache_LRUEviction));
+        var root = await NewTestFolderWithRetryAsync(nameof(Cache_OverBudget_SpillsToDiskWithoutLoss));
         try
         {
             // Create three subfolders so we have three cacheable paths.
@@ -261,9 +261,9 @@ public class CacheTests : IDisposable
             {
                 RootDirectoryOverride = _tempCacheRoot,
                 FlushIntervalSeconds = 0,
-                MaxEntries = 2
+                MaxInMemoryEntries = 2
             };
-            using var cache = new MetadataCache(_fixture.Service!, "lru-account", opts);
+            using var cache = new MetadataCache(_fixture.Service!, "spill-account", opts);
 
             await cache.GetChildrenAsync($"{root}/sub0");
             await Task.Delay(10);
@@ -271,10 +271,19 @@ public class CacheTests : IDisposable
             await Task.Delay(10);
             await cache.GetChildrenAsync($"{root}/sub2");
 
+            // The in-memory working set is bounded by the budget...
             Assert.Equal(2, cache.Count);
-            Assert.False(cache.TryGet($"{root}/sub0", out _));
-            Assert.True(cache.TryGet($"{root}/sub1", out _));
-            Assert.True(cache.TryGet($"{root}/sub2", out _));
+            // ...the least-recently-used entry was spilled out of memory...
+            Assert.DoesNotContain(cache.Snapshot(), e => e.Path == $"{root}/sub0");
+
+            // ...but the persistent cache is uncapped: after flushing the
+            // resident entries, all three survive on disk.
+            cache.Flush();
+            Assert.Equal(3, cache.PersistedCount());
+
+            // The spilled entry is transparently re-hydrated from disk.
+            Assert.True(cache.TryGet($"{root}/sub0", out var revived));
+            Assert.NotNull(revived);
         }
         finally
         {

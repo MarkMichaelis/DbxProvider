@@ -41,19 +41,22 @@ namespace DbxProvider.Cmdlets
             summary.Properties.Add(new PSNoteProperty("AccountId", cache.AccountId));
             summary.Properties.Add(new PSNoteProperty("AccountIdHash", cache.AccountIdHash));
             summary.Properties.Add(new PSNoteProperty("CacheDirectory", cache.AccountDirectory));
-            summary.Properties.Add(new PSNoteProperty("EntryCount", cache.Count));
+            summary.Properties.Add(new PSNoteProperty("DatabasePath", cache.DatabasePath));
+            summary.Properties.Add(new PSNoteProperty("InMemoryEntryCount", cache.Count));
+            summary.Properties.Add(new PSNoteProperty("PersistedEntryCount", cache.PersistedCount()));
             summary.Properties.Add(new PSNoteProperty("Enabled", cache.Options.Enabled));
-            summary.Properties.Add(new PSNoteProperty("MaxEntries", cache.Options.MaxEntries));
+            summary.Properties.Add(new PSNoteProperty("MaxInMemoryEntries", cache.Options.MaxInMemoryEntries));
             summary.Properties.Add(new PSNoteProperty("FlushIntervalSeconds", cache.Options.FlushIntervalSeconds));
             WriteObject(summary);
 
-            foreach (var entry in cache.Snapshot().OrderBy(e => e.Path))
+            foreach (var entry in cache.SnapshotInfo().OrderBy(e => e.Path))
             {
                 var row = new PSObject();
                 row.Properties.Add(new PSNoteProperty("Path", entry.Path));
-                row.Properties.Add(new PSNoteProperty("ItemCount", entry.Items.Count));
+                row.Properties.Add(new PSNoteProperty("ItemCount", entry.ItemCount));
                 row.Properties.Add(new PSNoteProperty("LastValidatedUtc", entry.LastValidatedUtc));
                 row.Properties.Add(new PSNoteProperty("LastUsedUtc", entry.LastUsedUtc));
+                row.Properties.Add(new PSNoteProperty("InMemory", entry.InMemory));
                 row.Properties.Add(new PSNoteProperty("Dirty", entry.Dirty));
                 row.Properties.Add(new PSNoteProperty("CursorPreview",
                     string.IsNullOrEmpty(entry.Cursor)
@@ -109,8 +112,8 @@ namespace DbxProvider.Cmdlets
         public SwitchParameter Enable { get; set; }
 
         [Parameter]
-        [ValidateRange(1, int.MaxValue)]
-        public int? MaxEntries { get; set; }
+        [ValidateRange(0, int.MaxValue)]
+        public int? MaxInMemoryEntries { get; set; }
 
         [Parameter]
         [ValidateRange(0, int.MaxValue)]
@@ -124,14 +127,14 @@ namespace DbxProvider.Cmdlets
             var cache = CacheCmdletHelpers.GetCache(this, DriveName);
             if (Disable.IsPresent) cache.Options.Enabled = false;
             if (Enable.IsPresent) cache.Options.Enabled = true;
-            if (MaxEntries.HasValue) cache.Options.MaxEntries = MaxEntries.Value;
+            if (MaxInMemoryEntries.HasValue) cache.Options.MaxInMemoryEntries = MaxInMemoryEntries.Value;
             if (FlushIntervalSeconds.HasValue) cache.Options.FlushIntervalSeconds = FlushIntervalSeconds.Value;
 
             // Also push these to the static Default so a subsequent Connect-Dropbox
             // (which constructs a new MetadataCache from CacheOptions.Default) inherits them.
             if (Disable.IsPresent) CacheOptions.Default.Enabled = false;
             if (Enable.IsPresent) CacheOptions.Default.Enabled = true;
-            if (MaxEntries.HasValue) CacheOptions.Default.MaxEntries = MaxEntries.Value;
+            if (MaxInMemoryEntries.HasValue) CacheOptions.Default.MaxInMemoryEntries = MaxInMemoryEntries.Value;
             if (FlushIntervalSeconds.HasValue) CacheOptions.Default.FlushIntervalSeconds = FlushIntervalSeconds.Value;
 
             WriteObject(new PSObject(cache.Options));
