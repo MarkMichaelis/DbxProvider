@@ -24,13 +24,19 @@ provider call + ``this.DynamicParameters`` type. Findings:
 
 Chosen approach (simplest correct, self-contained, no cross-call state):
 
-1. **Primary fix** -- ``DropboxProvider.ClearContent``: skip the zero-byte upload when
+1. **The fix** -- ``DropboxProvider.ClearContent``: skip the zero-byte upload when
    ``DynamicParameters is DropboxContentWriterDynamicParameters`` (the redundant implicit pre-write
    clear; the writer's overwrite already truncates+replaces). Otherwise (explicit ``Clear-Content``,
    ``DynamicParameters`` null) perform the zero-byte upload to truncate, as today.
-2. **Defensive secondary fix** -- ``DropboxContentWriter``: track whether any ``Write`` happened;
-   on ``Close`` skip the upload only when ``Write`` was NEVER called. Preserve the upload when
-   ``Write`` was called with empty content (``Set-Content -Value ''`` still truncates to empty).
+
+### Writer-guard evaluation (rejected by code review)
+
+A secondary "skip the writer upload when nothing was written" guard was prototyped and rejected:
+it changed ``Set-Content -Value @()``/``-Value $null`` from "truncate/replace in one revision"
+(matching the FileSystem provider) to a no-op, without adding protection against the dangerous
+*intermediate* revision (which the ClearContent fix already eliminates). For ``Set-Content -Value ''``
+the writer is called normally and uploads in one revision regardless. So the writer is left
+unchanged; the ClearContent discriminator alone is the complete fix.
 
 ## Test seam
 
@@ -40,16 +46,16 @@ only production change outside the two fixes.
 
 ## Tasks
 
-- [ ] (infra) Make ``UploadAsync`` virtual; add upload recording to ``FakeDropboxServiceClient``.
-- [ ] (RED) Host test: single ``Set-Content`` => exactly ONE upload, length > 0, no zero-byte
+- [x] (infra) Make ``UploadAsync`` virtual; add upload recording to ``FakeDropboxServiceClient``.
+- [x] (RED) Host test: single ``Set-Content`` => exactly ONE upload, length > 0, no zero-byte
       intermediate. Fails on current code (2 uploads incl. a 0-byte one).
-- [ ] (GREEN) ``ClearContent`` discriminator skips the implicit clear.
-- [ ] (guard) Host test: explicit ``Clear-Content`` => exactly ONE zero-byte upload (truncates).
+- [x] (GREEN) ``ClearContent`` discriminator skips the implicit clear.
+- [x] (guard) Host test: explicit ``Clear-Content`` => exactly ONE zero-byte upload (truncates).
       Guards against a blanket no-op regression.
-- [ ] (RED) Unit test: ``DropboxContentWriter.Close`` without any ``Write`` => no upload;
-      with ``Write('')`` => exactly one upload.
-- [ ] (GREEN) Writer guard tracks whether ``Write`` was called.
-- [ ] Refactor, functional test, evidence, code review, PR.
+- [x] (cover) Host tests: ``Set-Content -Value ''`` and ``-Value @()`` => exactly one upload, no
+      zero-byte intermediate.
+- [x] (review) Evaluate + reject the writer "anything written" guard (see above).
+- [x] Refactor, functional test, evidence, code review, PR.
 
 ## Acceptance criteria (from issue #17)
 

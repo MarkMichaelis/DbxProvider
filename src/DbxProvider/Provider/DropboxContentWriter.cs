@@ -15,7 +15,6 @@ namespace DbxProvider.Provider
         private MemoryStream _buffer;
         private StreamWriter? _writer;
         private bool _disposed;
-        private bool _hasWritten;
         private readonly bool _raw;
 
         public DropboxContentWriter(DropboxServiceClient service, string path, bool raw = false)
@@ -34,7 +33,6 @@ namespace DbxProvider.Provider
         {
             foreach (var item in content)
             {
-                _hasWritten = true;
                 if (_raw && item is byte[] bytes)
                 {
                     _buffer.Write(bytes, 0, bytes.Length);
@@ -64,14 +62,6 @@ namespace DbxProvider.Provider
 
         private void Flush()
         {
-            // A writer that was opened but never received any content (no Write call)
-            // must not create a spurious zero-byte server revision. Writing an empty
-            // value (Set-Content -Value '') does call Write, so that path still uploads
-            // and truncates the file to empty.
-            if (!_hasWritten)
-            {
-                return;
-            }
             _writer?.Flush();
             _buffer.Position = 0;
             _service.UploadAsync(_path, _buffer).GetAwaiter().GetResult();
