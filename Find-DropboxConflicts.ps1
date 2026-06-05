@@ -149,20 +149,20 @@ if ($Incremental) {
     # which we write to the same CSV manifest the full walk produces.
     Write-Host 'Incremental scan via Find-DropboxConflict...' -ForegroundColor Cyan
     $swInc = [System.Diagnostics.Stopwatch]::StartNew()
-    $matches = @(Find-DropboxConflict -Path $StartPath -Pattern $Pattern -DriveName $driveName `
+    $conflicts = @(Find-DropboxConflict -Path $StartPath -Pattern $Pattern -DriveName $driveName `
             -IncludeNonZero:$IncludeNonZero -Full:$Full)
 
     $writer = [System.IO.StreamWriter]::new($OutputCsv, $false, [System.Text.UTF8Encoding]::new($false))
     try {
         $writer.WriteLine('Bytes,Path')
-        foreach ($m in $matches) {
+        foreach ($m in $conflicts) {
             $writer.WriteLine(('{0},"{1}"' -f $m.Bytes, ($m.Path -replace '"', '""')))
         }
     }
     finally { $writer.Flush(); $writer.Dispose() }
 
     Write-Host ("Incremental scan complete in {0}s. matched={1}. Manifest: {2}" -f `
-            [int]$swInc.Elapsed.TotalSeconds, $matches.Count, $OutputCsv) -ForegroundColor Green
+            [int]$swInc.Elapsed.TotalSeconds, $conflicts.Count, $OutputCsv) -ForegroundColor Green
 }
 else {
 # --- Determine seeds + resume/dedupe state ---------------------------------
