@@ -156,8 +156,7 @@ namespace IntelliTect.Dropbox
 
             foreach (var item in items)
             {
-                if (Satisfies(item, matcher, p.IncludeNonZero))
-                    state.Matches[item.Path.ToLowerInvariant()] = new ConflictMatch { Path = item.Path, Bytes = item.Length };
+                Upsert(state, item, matcher, p.IncludeNonZero);
             }
 
             return new ConflictScanResult(state.Matches.Values.ToList(), state, wasFullScan: true);
@@ -190,15 +189,25 @@ namespace IntelliTect.Dropbox
         {
             foreach (var item in delta.AddsOrUpdates)
             {
-                var key = item.Path.ToLowerInvariant();
-                if (Satisfies(item, matcher, includeNonZero))
-                    state.Matches[key] = new ConflictMatch { Path = item.Path, Bytes = item.Length };
-                else
-                    state.Matches.Remove(key); // previously matched but no longer qualifies
+                Upsert(state, item, matcher, includeNonZero);
             }
 
             foreach (var removed in delta.Removes)
                 state.Matches.Remove(removed); // Removes are already lowercased
+        }
+
+        /// <summary>
+        /// Records <paramref name="item"/> as a match when it satisfies the
+        /// criteria; otherwise drops any prior match at that path (e.g. a
+        /// previously-zero conflict file that grew).
+        /// </summary>
+        private static void Upsert(ConflictScanState state, DropboxItem item, WildcardMatcher matcher, bool includeNonZero)
+        {
+            var key = item.Path.ToLowerInvariant();
+            if (Satisfies(item, matcher, includeNonZero))
+                state.Matches[key] = new ConflictMatch { Path = item.Path, Bytes = item.Length };
+            else
+                state.Matches.Remove(key);
         }
 
         private static ConflictScanState CloneForUpdate(

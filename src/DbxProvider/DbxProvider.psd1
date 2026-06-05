@@ -24,8 +24,9 @@
         'Update-DropboxCache',
         'Set-DropboxCacheOption',
         # Search
-        'Search-Dropbox',
-        # Revisions
+        'Search-Dropbox',        # Revisions
+        # Conflict scan
+        'Find-DropboxConflict',        # Revisions
         'Get-DropboxRevision',
         'Restore-DropboxRevision',
         # Transfer
