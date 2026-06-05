@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Management.Automation;
 using System.Text;
 using IntelliTect.Dropbox;
@@ -55,6 +56,18 @@ public class ContentWriteRevisionTests
         return fake;
     }
 
+    /// <summary>Decodes an upload's payload as UTF-8 user text, stripping any
+    /// leading UTF-8 byte-order-mark preamble the writer emits, so tests can assert
+    /// on the content a user would see rather than encoding bytes.</summary>
+    private static string DecodeContent(FakeDropboxServiceClient.UploadRecord upload)
+    {
+        var preamble = Encoding.UTF8.GetPreamble();
+        var bytes = upload.Content;
+        int start = bytes.Length >= preamble.Length && bytes.Take(preamble.Length).SequenceEqual(preamble)
+            ? preamble.Length : 0;
+        return Encoding.UTF8.GetString(bytes, start, bytes.Length - start);
+    }
+
     [Fact]
     public void SetContent_ProducesSingleOverwriteUpload_NoZeroByteIntermediate()
     {
@@ -64,6 +77,7 @@ public class ContentWriteRevisionTests
         Assert.Equal("/A/b.txt", fake.Uploads[0].Path);
         Assert.True(fake.Uploads[0].Length > 0,
             $"Expected the single upload to carry content, but it was {fake.Uploads[0].Length} bytes.");
+        Assert.Equal("hello world", DecodeContent(fake.Uploads[0]).TrimEnd('\r', '\n'));
     }
 
     [Fact]
@@ -89,14 +103,17 @@ public class ContentWriteRevisionTests
     }
 
     [Fact]
-    public void SetContent_EmptyArray_ProducesSingleUpload_NoZeroByteIntermediate()
+    public void SetContent_EmptyArray_ProducesSingleUpload_WithNoUserContent()
     {
         // Set-Content -Value @() yields a writer that receives no content; the single
         // overwrite truncates/replaces the file in one revision (matching the
-        // FileSystem provider), with no separate intermediate revision.
+        // FileSystem provider), with no separate intermediate revision. The payload
+        // carries only the encoding preamble -- no user content (asserting raw
+        // Length == 0 would be wrong because the writer emits a UTF-8 BOM).
         var fake = RunScript("Set-Content -LiteralPath 'Dbx:\\A\\b.txt' -Value @()");
 
         Assert.Single(fake.Uploads);
         Assert.Equal("/A/b.txt", fake.Uploads[0].Path);
+        Assert.Equal("", DecodeContent(fake.Uploads[0]));
     }
 }
