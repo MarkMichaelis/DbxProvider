@@ -218,7 +218,7 @@ namespace IntelliTect.Dropbox
             return await response.GetContentAsByteArrayAsync();
         }
 
-        public Task<DropboxItem> UploadAsync(string path, Stream content, WriteMode? mode = null, CancellationToken cancellationToken = default) =>
+        public virtual Task<DropboxItem> UploadAsync(string path, Stream content, WriteMode? mode = null, CancellationToken cancellationToken = default) =>
             RetryAsync(_ => UploadCoreAsync(path, content, mode), cancellationToken);
 
         private async Task<DropboxItem> UploadCoreAsync(string path, Stream content, WriteMode? mode = null)
