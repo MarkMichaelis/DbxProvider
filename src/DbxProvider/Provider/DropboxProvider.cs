@@ -645,6 +645,25 @@ namespace DbxProvider.Provider
 
         public void ClearContent(string path)
         {
+            // PowerShell invokes ClearContent as the implicit truncate that precedes
+            // every Set-Content/Out-File/redirection BEFORE handing the content to
+            // GetContentWriter. During that implicit clear the active cmdlet is the
+            // content writer, so the provider's DynamicParameters are the writer's
+            // (DropboxContentWriterDynamicParameters). The writer then performs a
+            // WriteMode.Overwrite upload that already truncates and replaces the file,
+            // so uploading a separate zero-byte revision here is redundant -- and
+            // dangerous, because a concurrent Dropbox sync client can race that
+            // zero-byte intermediate into a zero-byte "conflicted copy". Skip it and
+            // let the writer's overwrite be the single revision.
+            //
+            // An explicit Clear-Content has no following writer; ClearContentDynamicParameters
+            // returns null, so DynamicParameters is not the writer's type and we must
+            // upload zero bytes to truncate the file on the server.
+            if (DynamicParameters is DropboxContentWriterDynamicParameters)
+            {
+                return;
+            }
+
             try
             {
                 var service = GetService();
