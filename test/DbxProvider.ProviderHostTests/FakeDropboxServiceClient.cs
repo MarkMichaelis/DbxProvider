@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Dropbox.Api.Files;
 using IntelliTect.Dropbox;
 
 namespace DbxProvider.ProviderHostTests;
@@ -11,13 +12,22 @@ namespace DbxProvider.ProviderHostTests;
 /// provider in-process without touching the Dropbox API. Only the read-path
 /// methods exercised by <c>Get-ChildItem</c>/<c>Get-Item</c> are overridden.
 /// </summary>
-public sealed class FakeDropboxServiceClient : DropboxServiceClient
+public class FakeDropboxServiceClient : DropboxServiceClient
 {
     private readonly List<DropboxItem> _items;
     private readonly Queue<ListFolderDelta> _scriptedDeltas = new();
     private int _fullListCalls;
     private int _continueCalls;
     private string _fullCursor = "cursor-full-0";
+
+    /// <summary>Records every <see cref="UploadAsync"/> call in order, capturing
+    /// the normalized path and the byte length of the uploaded stream. Tests use
+    /// this to assert how many server revisions a single cmdlet produced.</summary>
+    public List<UploadRecord> Uploads { get; } = new();
+
+    /// <summary>A single recorded upload: the normalized path and the number of
+    /// bytes written to the server.</summary>
+    public sealed record UploadRecord(string Path, long Length);
 
     public FakeDropboxServiceClient(IEnumerable<DropboxItem> items)
         : base((Dropbox.Api.DropboxClient)null!)
@@ -59,6 +69,25 @@ public sealed class FakeDropboxServiceClient : DropboxServiceClient
         if (_scriptedDeltas.Count == 0)
             return Task.FromResult(new ListFolderDelta { NewCursor = cursor, HasMore = false });
         return Task.FromResult(_scriptedDeltas.Dequeue());
+    }
+
+    public override Task<DropboxItem> UploadAsync(string path, System.IO.Stream content, WriteMode? mode = null, CancellationToken cancellationToken = default)
+    {
+        var norm = NormalizePath(path);
+        long length = content.CanSeek ? content.Length : -1;
+        Uploads.Add(new UploadRecord(norm, length));
+
+        var item = new DropboxItem
+        {
+            Name = norm.Contains('/') ? norm[(norm.LastIndexOf('/') + 1)..] : norm.TrimStart('/'),
+            Path = norm,
+            IsFolder = false,
+            Id = "id:" + norm,
+            Length = length < 0 ? 0 : (ulong)length,
+        };
+        _items.RemoveAll(i => i.Path == norm);
+        _items.Add(item);
+        return Task.FromResult(item);
     }
 
     private static string Parent(string normalizedPath)
