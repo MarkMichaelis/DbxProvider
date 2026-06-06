@@ -32,11 +32,21 @@ namespace IntelliTect.Dropbox
         /// this directory.</summary>
         public string? RootDirectoryOverride { get; set; }
 
+        /// <summary>
+        /// The directory that holds the single per-account cache database file.
+        /// When <see cref="RootDirectoryOverride"/> is set it is used verbatim;
+        /// otherwise the default is <c>%LOCALAPPDATA%\DbxProvider</c> (the same
+        /// directory that holds <c>config.json</c>). Because the database file
+        /// is already named <c>DropboxCache.&lt;email&gt;.db</c>, no redundant
+        /// <c>cache</c> subfolder is used. Databases left behind by an older
+        /// <c>...\DbxProvider\cache\</c> layout are simply orphaned; the
+        /// cursor-validated cache rebuilds lazily.
+        /// </summary>
         public string EffectiveRootDirectory =>
             RootDirectoryOverride ??
             System.IO.Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "DbxProvider", "cache");
+                "DbxProvider");
 
         /// <summary>
         /// Per-account override of the metadata cache database file path, keyed

@@ -25,7 +25,9 @@ namespace IntelliTect.Dropbox
     /// has changed.
     ///
     /// Entries are persisted to a single-file SQLite database placed directly
-    /// under <c>%LOCALAPPDATA%\DbxProvider\cache\</c>. The file is named
+    /// under <c>%LOCALAPPDATA%\DbxProvider\</c> (the same directory that holds
+    /// <c>config.json</c>; no redundant <c>cache</c> subfolder is used). The
+    /// file is named
     /// <c>DropboxCache.&lt;email&gt;.db</c> using the account's email (sanitized for
     /// the file system); when no email is available a SHA-256 hash of the
     /// account id is used instead (<c>DropboxCache.&lt;accountIdHash&gt;.db</c>).
