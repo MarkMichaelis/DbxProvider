@@ -114,8 +114,8 @@ namespace DbxProvider.Cmdlets
                         return;
                     }
 
-                    appKey       ??= saved?.Account.AppKey;
-                    appSecret    ??= saved?.Account.AppSecret;
+                    appKey ??= saved?.Account.AppKey;
+                    appSecret ??= saved?.Account.AppSecret;
                     refreshToken ??= saved?.Account.RefreshToken;
 
                     // No matching saved account and no -AppKey on the command line
@@ -132,7 +132,7 @@ namespace DbxProvider.Cmdlets
                         var registered = PromptForNewAppRegistration(RedirectPort);
                         if (registered != null)
                         {
-                            appKey    = registered.Value.AppKey;
+                            appKey = registered.Value.AppKey;
                             appSecret = registered.Value.AppSecret;
                         }
                     }
@@ -177,12 +177,12 @@ namespace DbxProvider.Cmdlets
                 {
                     CredentialStore.SaveAccount(new StoredAccount
                     {
-                        AppKey       = appKey,
-                        AppSecret    = appSecret,
+                        AppKey = appKey,
+                        AppSecret = appSecret,
                         RefreshToken = refreshToken,
-                        AccountId    = account.AccountId,
-                        Email        = account.Email,
-                        DisplayName  = account.DisplayName
+                        AccountId = account.AccountId,
+                        Email = account.Email,
+                        DisplayName = account.DisplayName
                     });
                     if (!string.IsNullOrEmpty(CredentialStore.LastSaveWarning))
                         WriteWarning(CredentialStore.LastSaveWarning);
@@ -509,7 +509,7 @@ namespace DbxProvider.Cmdlets
         {
             var atIdx = email.IndexOf('@');
             if (atIdx <= 0) return string.Empty;
-            var local  = SanitizeDriveName(email.Substring(0, atIdx));
+            var local = SanitizeDriveName(email.Substring(0, atIdx));
             var domain = email.Substring(atIdx + 1);
             if (string.IsNullOrEmpty(local)) return string.Empty;
 
