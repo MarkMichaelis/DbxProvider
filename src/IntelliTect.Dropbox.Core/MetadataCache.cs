@@ -24,8 +24,11 @@ namespace IntelliTect.Dropbox
     /// snapshot, and return — typically a single fast round-trip when nothing
     /// has changed.
     ///
-    /// Entries are persisted to a single-file SQLite database under
-    /// <c>%LOCALAPPDATA%\DbxProvider\cache\&lt;accountIdHash&gt;\metadata.db</c>.
+    /// Entries are persisted to a single-file SQLite database placed directly
+    /// under <c>%LOCALAPPDATA%\DbxProvider\cache\</c>. The file is named
+    /// <c>DropboxCache.&lt;email&gt;.db</c> using the account's email (sanitized for
+    /// the file system); when no email is available a SHA-256 hash of the
+    /// account id is used instead (<c>DropboxCache.&lt;accountIdHash&gt;.db</c>).
     /// The persistent store is <b>unbounded</b> — nothing is ever evicted from
     /// disk. Entries are hydrated lazily (per path, on demand) so startup never
     /// pays to read the whole store. A bounded in-memory working set keeps the
@@ -66,6 +69,7 @@ namespace IntelliTect.Dropbox
         private readonly DropboxServiceClient _service;
         private readonly CacheOptions _options;
         private readonly string _accountId;
+        private readonly string _email;
         private readonly string _accountIdHash;
         private readonly string _accountDir;
         private readonly string _dbPath;
@@ -83,15 +87,16 @@ namespace IntelliTect.Dropbox
         };
 
         public MetadataCache(DropboxServiceClient service, string accountId,
-            CacheOptions? options = null)
+            string? email, CacheOptions? options = null)
         {
             _service = service ?? throw new ArgumentNullException(nameof(service));
             _accountId = accountId ?? "";
+            _email = email ?? "";
             _options = options ?? CacheOptions.Default;
 
             _accountIdHash = HashString(_accountId);
-            _accountDir = Path.Combine(_options.EffectiveRootDirectory, _accountIdHash);
-            _dbPath = Path.Combine(_accountDir, "metadata.db");
+            _accountDir = _options.EffectiveRootDirectory;
+            _dbPath = Path.Combine(_accountDir, BuildDatabaseFileName(_email, _accountIdHash));
 
             _db = OpenDatabase();
 
@@ -104,6 +109,7 @@ namespace IntelliTect.Dropbox
 
         public CacheOptions Options => _options;
         public string AccountId => _accountId;
+        public string Email => _email;
         public string AccountIdHash => _accountIdHash;
         public string AccountDirectory => _accountDir;
         public string DatabasePath => _dbPath;
@@ -565,6 +571,38 @@ namespace IntelliTect.Dropbox
             using var sha = SHA256.Create();
             var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(input ?? ""));
             return BitConverter.ToString(bytes).Replace("-", "").ToLowerInvariant();
+        }
+
+        /// <summary>
+        /// Builds the single-file database name placed directly in the cache
+        /// root. When an email is available the file is named
+        /// <c>DropboxCache.&lt;sanitized-email&gt;.db</c>; otherwise a SHA-256 hash
+        /// of the account id is used so multi-account isolation is preserved and
+        /// a malformed name like <c>DropboxCache..db</c> is never produced.
+        /// </summary>
+        private static string BuildDatabaseFileName(string email, string accountIdHash)
+        {
+            var label = string.IsNullOrWhiteSpace(email)
+                ? accountIdHash
+                : SanitizeForFileName(email);
+            return $"DropboxCache.{label}.db";
+        }
+
+        /// <summary>
+        /// Lowercases the email and replaces any character that is invalid in a
+        /// file name with <c>_</c>. Email-legal characters such as <c>@ . + -</c>
+        /// are preserved.
+        /// </summary>
+        private static string SanitizeForFileName(string email)
+        {
+            var lower = email.Trim().ToLowerInvariant();
+            var invalid = Path.GetInvalidFileNameChars();
+            var builder = new StringBuilder(lower.Length);
+            foreach (var ch in lower)
+            {
+                builder.Append(Array.IndexOf(invalid, ch) >= 0 ? '_' : ch);
+            }
+            return builder.ToString();
         }
     }
 }

@@ -208,7 +208,7 @@ namespace DbxProvider.Cmdlets
                     "\\", $"Dropbox ({account.Email})", null);
 
                 var dbxDrive = new DropboxDriveInfo(driveInfo, service);
-                dbxDrive.InitializeCache(account.AccountId);
+                dbxDrive.InitializeCache(account.AccountId, account.Email);
                 SessionState.Drive.New(dbxDrive, "global");
                 WriteObject(dbxDrive);
 

@@ -27,13 +27,15 @@ namespace DbxProvider.Provider
 
         /// <summary>
         /// Initialize (or re-initialize) the metadata cache for this drive,
-        /// scoped to the given Dropbox account id. Hydrates from disk.
+        /// scoped to the given Dropbox account. The account email (when
+        /// available) names the on-disk cache file; otherwise a hash of the
+        /// account id is used. Hydrates from disk.
         /// </summary>
-        public void InitializeCache(string accountId, CacheOptions? options = null)
+        public void InitializeCache(string accountId, string? email = null, CacheOptions? options = null)
         {
             AccountId = accountId;
             Cache?.Dispose();
-            Cache = new MetadataCache(Service, accountId, options ?? CacheOptions.Default);
+            Cache = new MetadataCache(Service, accountId, email, options ?? CacheOptions.Default);
         }
 
         public void Dispose()

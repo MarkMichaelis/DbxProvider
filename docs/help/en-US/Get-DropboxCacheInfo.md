@@ -19,11 +19,11 @@ Get-DropboxCacheInfo [[-DriveName] <String>] [-ProgressAction <ActionPreference>
 
 ## DESCRIPTION
 
-Emits one summary object (drive name, account id, cache directory,
-entry count, and current cache options) followed by one row per cached
-folder showing path, item count, last-validated/last-used timestamps,
-dirty flag, and a cursor preview. Useful for verifying that
-`Get-ChildItem` is hitting the cache.
+Emits one summary object (drive name, account id, account email, cache
+directory, database path, entry count, and current cache options) followed
+by one row per cached folder showing path, item count,
+last-validated/last-used timestamps, dirty flag, and a cursor preview.
+Useful for verifying that `Get-ChildItem` is hitting the cache.
 
 ## EXAMPLES
 

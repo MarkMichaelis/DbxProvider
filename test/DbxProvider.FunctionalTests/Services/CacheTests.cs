@@ -28,7 +28,7 @@ public class CacheTests : IDisposable
     {
         opts ??= new CacheOptions { RootDirectoryOverride = _tempCacheRoot, FlushIntervalSeconds = 0 };
         opts.RootDirectoryOverride ??= _tempCacheRoot;
-        return new MetadataCache(_fixture.Service!, accountId, opts);
+        return new MetadataCache(_fixture.Service!, accountId, null, opts);
     }
 
     /// <summary>Create a test folder. Rate-limit / soft-throttle retries are
@@ -234,7 +234,7 @@ public class CacheTests : IDisposable
             a.Flush();
 
             Assert.NotEqual(a.AccountIdHash, b.AccountIdHash);
-            Assert.NotEqual(a.AccountDirectory, b.AccountDirectory);
+            Assert.NotEqual(a.DatabasePath, b.DatabasePath);
 
             // B has no entry, A does.
             Assert.False(b.TryGet(folder, out _));
@@ -263,7 +263,7 @@ public class CacheTests : IDisposable
                 FlushIntervalSeconds = 0,
                 MaxInMemoryEntries = 2
             };
-            using var cache = new MetadataCache(_fixture.Service!, "spill-account", opts);
+            using var cache = new MetadataCache(_fixture.Service!, "spill-account", null, opts);
 
             await cache.GetChildrenAsync($"{root}/sub0");
             await Task.Delay(10);
@@ -307,7 +307,7 @@ public class CacheTests : IDisposable
                 FlushIntervalSeconds = 0,
                 Enabled = false
             };
-            using var cache = new MetadataCache(_fixture.Service!, "disabled-account", opts);
+            using var cache = new MetadataCache(_fixture.Service!, "disabled-account", null, opts);
 
             await RetryOnNotFoundAsync(async () => { await cache.GetChildrenAsync(folder); return 0; });
             await cache.GetChildrenAsync(folder);
