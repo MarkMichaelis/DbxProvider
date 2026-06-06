@@ -39,7 +39,7 @@ namespace DbxProvider.Cmdlets
             var summary = new PSObject();
             summary.Properties.Add(new PSNoteProperty("DriveName", DriveName));
             summary.Properties.Add(new PSNoteProperty("AccountId", cache.AccountId));
-            summary.Properties.Add(new PSNoteProperty("AccountIdHash", cache.AccountIdHash));
+            summary.Properties.Add(new PSNoteProperty("Email", cache.Email));
             summary.Properties.Add(new PSNoteProperty("CacheDirectory", cache.AccountDirectory));
             summary.Properties.Add(new PSNoteProperty("DatabasePath", cache.DatabasePath));
             summary.Properties.Add(new PSNoteProperty("InMemoryEntryCount", cache.Count));

@@ -26,7 +26,9 @@ namespace IntelliTect.Dropbox
         /// <summary>Background disk-flush cadence. Set to 0 to disable.</summary>
         public int FlushIntervalSeconds { get; set; } = 5;
 
-        /// <summary>Override the on-disk cache root (per-account subdir is appended).</summary>
+        /// <summary>Override the on-disk cache root. The single per-account
+        /// database file (named from the account email) is placed directly in
+        /// this directory.</summary>
         public string? RootDirectoryOverride { get; set; }
 
         public string EffectiveRootDirectory =>
