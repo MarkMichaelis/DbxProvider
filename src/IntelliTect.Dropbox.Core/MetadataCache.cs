@@ -96,7 +96,7 @@ namespace IntelliTect.Dropbox
 
             _accountIdHash = HashString(_accountId);
             _accountDir = _options.EffectiveRootDirectory;
-            _dbPath = Path.Combine(_accountDir, BuildDatabaseFileName(_email, _accountIdHash));
+            _dbPath = GetDatabasePath(_options, _email, _accountId);
 
             _db = OpenDatabase();
 
@@ -399,7 +399,9 @@ namespace IntelliTect.Dropbox
 
         private SqliteConnection OpenDatabase()
         {
-            Directory.CreateDirectory(_accountDir);
+            var databaseDirectory = Path.GetDirectoryName(_dbPath);
+            Directory.CreateDirectory(
+                string.IsNullOrEmpty(databaseDirectory) ? _accountDir : databaseDirectory);
             var connectionString = new SqliteConnectionStringBuilder
             {
                 DataSource = _dbPath,
@@ -565,6 +567,82 @@ namespace IntelliTect.Dropbox
                 DateTimeStyles.RoundtripKind, out var dt)
                 ? dt
                 : DateTime.MinValue;
+
+        /// <summary>
+        /// Resolves the on-disk database path for an account under the supplied
+        /// options. If <paramref name="email"/> is non-empty and has an entry in
+        /// <see cref="CacheOptions.EmailDatabasePathOverrides"/>, the configured
+        /// path is expanded (leading <c>~</c> -> user profile, environment
+        /// variables) and made absolute, then used verbatim. A configured path
+        /// that names an existing directory or ends in a separator gets the
+        /// default <c>DropboxCache.&lt;email&gt;.db</c> file placed inside it.
+        /// Otherwise the path falls back to
+        /// <c>&lt;EffectiveRootDirectory&gt;\DropboxCache.&lt;email-or-hash&gt;.db</c>.
+        /// </summary>
+        /// <param name="options">Cache options carrying any overrides and the root.</param>
+        /// <param name="email">Account email (case-insensitive override key).</param>
+        /// <param name="accountId">Account id, hashed for the empty-email fallback.</param>
+        public static string GetDatabasePath(CacheOptions options, string? email, string? accountId)
+        {
+            if (options == null)
+            {
+                throw new ArgumentNullException(nameof(options));
+            }
+
+            var resolvedEmail = email ?? "";
+            var accountIdHash = HashString(accountId ?? "");
+
+            if (!string.IsNullOrWhiteSpace(resolvedEmail) &&
+                options.EmailDatabasePathOverrides.TryGetValue(resolvedEmail, out var configured) &&
+                !string.IsNullOrWhiteSpace(configured))
+            {
+                return ResolveOverridePath(configured, resolvedEmail, accountIdHash);
+            }
+
+            return Path.Combine(options.EffectiveRootDirectory,
+                BuildDatabaseFileName(resolvedEmail, accountIdHash));
+        }
+
+        /// <summary>
+        /// Expands and absolutizes a configured override path. A directory-like
+        /// path receives the default database file name; a file path is used as-is.
+        /// </summary>
+        private static string ResolveOverridePath(string configured, string email, string accountIdHash)
+        {
+            var expanded = ExpandHomeAndEnvironment(configured);
+            var treatAsDirectory = EndsInDirectorySeparator(expanded) || Directory.Exists(expanded);
+            var full = Path.GetFullPath(expanded);
+            return treatAsDirectory
+                ? Path.Combine(full, BuildDatabaseFileName(email, accountIdHash))
+                : full;
+        }
+
+        /// <summary>
+        /// Expands a leading <c>~</c> (alone, or followed by <c>/</c> or <c>\</c>)
+        /// to the user profile directory, then expands environment variables. The
+        /// result is not yet absolutized.
+        /// </summary>
+        private static string ExpandHomeAndEnvironment(string path)
+        {
+            var trimmed = path.Trim();
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (trimmed == "~")
+            {
+                trimmed = home;
+            }
+            else if (trimmed.StartsWith("~/", StringComparison.Ordinal) ||
+                     trimmed.StartsWith("~\\", StringComparison.Ordinal))
+            {
+                trimmed = Path.Combine(home, trimmed.Substring(2));
+            }
+
+            return Environment.ExpandEnvironmentVariables(trimmed);
+        }
+
+        private static bool EndsInDirectorySeparator(string path) =>
+            path.Length > 0 &&
+            (path[path.Length - 1] == Path.DirectorySeparatorChar ||
+             path[path.Length - 1] == Path.AltDirectorySeparatorChar);
 
         private static string HashString(string input)
         {
