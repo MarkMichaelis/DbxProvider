@@ -358,6 +358,21 @@ namespace IntelliTect.Dropbox
 
         #region Files - Search
 
+        /// <summary>
+        /// Number of results a single <c>filenameOnly</c> search_v2 scope may
+        /// return before the API stops yielding more. When a scope reaches this
+        /// ceiling the exhaustive search subdivides into child folders so the
+        /// result set stays complete.
+        /// </summary>
+        private const int DefaultSearchResultCeiling = 10000;
+
+        /// <summary>
+        /// Per-scope search_v2 result ceiling used by the exhaustive filename
+        /// search. Tests lower this to exercise folder subdivision without
+        /// enumerating thousands of results.
+        /// </summary>
+        internal int SearchResultCeiling { get; set; } = DefaultSearchResultCeiling;
+
         public Task<List<DropboxSearchResult>> SearchAsync(string query, string path = "",
             int maxResults = 100, bool includeHighlights = false,
             bool filenameOnly = false,
@@ -422,18 +437,80 @@ namespace IntelliTect.Dropbox
         }
 
         /// <summary>
+        /// A single page of filename-only search_v2 results plus the
+        /// continuation state needed to fetch the next page.
+        /// </summary>
+        public sealed class SearchPage
+        {
+            /// <summary>The file/folder metadata returned by this page.</summary>
+            public List<DropboxItem> Items { get; } = new();
+
+            /// <summary>Cursor to pass to the next <see cref="SearchFilenamePageAsync"/> call.</summary>
+            public string Cursor { get; set; } = string.Empty;
+
+            /// <summary>True when more pages remain for the same query.</summary>
+            public bool HasMore { get; set; }
+        }
+
+        /// <summary>
+        /// Fetches a single page of a <c>filenameOnly</c> search_v2 query scoped
+        /// to <paramref name="path"/>. When <paramref name="cursor"/> is non-empty
+        /// it continues a prior search (the <paramref name="query"/> and
+        /// <paramref name="path"/> are ignored); otherwise it starts a new search.
+        /// Unlike <see cref="SearchAsync"/>, this exposes the raw cursor so callers
+        /// can page exhaustively and react to the search_v2 result ceiling.
+        /// </summary>
+        public virtual Task<SearchPage> SearchFilenamePageAsync(string query, string path,
+            string? cursor = null, CancellationToken cancellationToken = default) =>
+            RetryAsync(_ => SearchFilenamePageCoreAsync(query, path, cursor), cancellationToken);
+
+        private async Task<SearchPage> SearchFilenamePageCoreAsync(string query, string path, string? cursor)
+        {
+            SearchV2Result result;
+            if (string.IsNullOrEmpty(cursor))
+            {
+                var options = new SearchOptions(
+                    path: string.IsNullOrEmpty(path) ? null : NormalizePath(path),
+                    filenameOnly: true);
+                result = await _client.Files.SearchV2Async(query, options);
+            }
+            else
+            {
+                result = await _client.Files.SearchContinueV2Async(cursor);
+            }
+
+            var page = new SearchPage { Cursor = result.Cursor, HasMore = result.HasMore };
+            foreach (var match in result.Matches)
+                if (match.Metadata?.AsMetadata?.Value is Metadata md)
+                    page.Items.Add(MapMetadataToItem(md));
+            return page;
+        }
+
+        /// <summary>
         /// Filename-only search using a PowerShell wildcard pattern. Dropbox's
         /// search_v2 is prefix-token-based (not glob), so we derive a token
-        /// query from the pattern, then post-filter the results with
+        /// query from the pattern, page the indexed search exhaustively (cursor
+        /// pagination plus child-folder subdivision when a scope reaches the
+        /// per-scope result ceiling), then post-filter the results with
         /// <see cref="WildcardMatcher"/> to enforce true PowerShell wildcard
-        /// semantics without depending on System.Management.Automation.
+        /// semantics without depending on System.Management.Automation. The
+        /// result is exhaustive and cap-safe so every consumer (provider
+        /// auto-route, conflict scanner, NuGet callers) gets the full match set.
         /// </summary>
+        /// <param name="pattern">PowerShell wildcard pattern matched against file names.</param>
+        /// <param name="path">Subtree the search is scoped to; empty means the account root.</param>
+        /// <param name="maxResults">
+        /// Upper bound on returned matches. Defaults to effectively unbounded
+        /// (<see cref="int.MaxValue"/>); pass a smaller value to stop early once
+        /// that many matches are collected.
+        /// </param>
+        /// <param name="cancellationToken">Token to cancel the operation.</param>
         public Task<List<DropboxItem>> SearchByFilenameAsync(string pattern,
-            string path = "", int maxResults = 1000, CancellationToken cancellationToken = default) =>
-            RetryAsync(_ => SearchByFilenameCoreAsync(pattern, path, maxResults), cancellationToken);
+            string path = "", int maxResults = int.MaxValue, CancellationToken cancellationToken = default) =>
+            RetryAsync(_ => SearchByFilenameCoreAsync(pattern, path, maxResults, cancellationToken), cancellationToken);
 
         private async Task<List<DropboxItem>> SearchByFilenameCoreAsync(string pattern,
-            string path = "", int maxResults = 1000)
+            string path, int maxResults, CancellationToken cancellationToken)
         {
             var wildcard = new WildcardMatcher(pattern);
 
@@ -468,13 +545,10 @@ namespace IntelliTect.Dropbox
             // pure wildcards (e.g. "*"); fall back to a recursive listing
             // filtered client-side.
             if (string.IsNullOrEmpty(query) && extension == null)
-            {
-                var listed = await ListFolderAsync(path, recursive: true);
-                return listed.Where(i => wildcard.IsMatch(i.Name)).Take(maxResults).ToList();
-            }
+                return await ListFilteredAsync(path, wildcard, maxResults).ConfigureAwait(false);
 
             // Extension-only patterns (e.g. "*.txt", "*.pdf") have no useful
-            // search token — the only "token" we'd derive equals the extension,
+            // search token -- the only "token" we'd derive equals the extension,
             // and Dropbox's search_v2 is unreliable for such short, common
             // tokens (often returning zero hits even when matching files
             // exist). Fall back to a recursive listing filtered client-side,
@@ -483,24 +557,68 @@ namespace IntelliTect.Dropbox
                 && (tokens.Length == 0
                     || (tokens.Length == 1
                         && string.Equals(tokens[0], extension, StringComparison.OrdinalIgnoreCase))))
+                return await ListFilteredAsync(path, wildcard, maxResults).ConfigureAwait(false);
+
+            return await SearchFilenameExhaustiveAsync(query, path, wildcard, maxResults, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        private async Task<List<DropboxItem>> ListFilteredAsync(string path, WildcardMatcher wildcard, int maxResults)
+        {
+            var listed = await ListFolderAsync(path, recursive: true).ConfigureAwait(false);
+            return listed.Where(i => wildcard.IsMatch(i.Name)).Take(maxResults).ToList();
+        }
+
+        /// <summary>
+        /// Pages a <c>filenameOnly</c> search exhaustively and cap-safely: it
+        /// follows the cursor across pages, and when a scope reaches
+        /// <see cref="SearchResultCeiling"/> it lists the immediate child folders
+        /// and recurses into each, unioning and deduping matches by lowercased
+        /// path so no result is silently truncated.
+        /// </summary>
+        private async Task<List<DropboxItem>> SearchFilenameExhaustiveAsync(
+            string query, string path, WildcardMatcher wildcard, int maxResults, CancellationToken ct)
+        {
+            var matches = new Dictionary<string, DropboxItem>(StringComparer.Ordinal);
+            await SearchScopeExhaustiveAsync(query, path, wildcard, maxResults, matches, ct).ConfigureAwait(false);
+            return matches.Values.ToList();
+        }
+
+        private async Task SearchScopeExhaustiveAsync(string query, string path, WildcardMatcher wildcard,
+            int maxResults, Dictionary<string, DropboxItem> matches, CancellationToken ct)
+        {
+            string? cursor = null;
+            int retrieved = 0;
+            while (true)
             {
-                var listed = await ListFolderAsync(path, recursive: true);
-                return listed.Where(i => wildcard.IsMatch(i.Name)).Take(maxResults).ToList();
+                var page = await SearchFilenamePageAsync(query, path, cursor, ct).ConfigureAwait(false);
+                foreach (var item in page.Items)
+                {
+                    retrieved++;
+                    if (wildcard.IsMatch(item.Name))
+                        matches[item.Path.ToLowerInvariant()] = item;
+                    if (matches.Count >= maxResults) return;
+                }
+                cursor = page.Cursor;
+
+                if (retrieved >= SearchResultCeiling)
+                {
+                    await SubdivideExhaustiveAsync(query, path, wildcard, maxResults, matches, ct).ConfigureAwait(false);
+                    return;
+                }
+                if (!page.HasMore) return;
             }
+        }
 
-            var raw = await SearchAsync(
-                query: query,
-                path: path,
-                maxResults: maxResults,
-                includeHighlights: false,
-                filenameOnly: true,
-                fileExtensions: extension != null ? new[] { extension } : null,
-                orderBy: SearchOrderBy.Relevance.Instance);
-
-            return raw
-                .Where(r => r.Item != null && wildcard.IsMatch(r.Item.Name))
-                .Select(r => r.Item!)
-                .ToList();
+        private async Task SubdivideExhaustiveAsync(string query, string path, WildcardMatcher wildcard,
+            int maxResults, Dictionary<string, DropboxItem> matches, CancellationToken ct)
+        {
+            var children = await ListFolderAsync(path, recursive: false, includeDeleted: false, ct).ConfigureAwait(false);
+            foreach (var child in children.Where(c => c.IsFolder))
+            {
+                if (matches.Count >= maxResults) return;
+                await SearchScopeExhaustiveAsync(query, child.Path, wildcard, maxResults, matches, ct).ConfigureAwait(false);
+            }
         }
 
         #endregion

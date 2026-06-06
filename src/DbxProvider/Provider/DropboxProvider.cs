@@ -421,7 +421,7 @@ namespace DbxProvider.Provider
                         var pattern = filterPattern ?? pathPattern;
                         var searchScope = pathHasWildcard ? scope : path;
                         WriteVerbose($"Get-ChildItem: routing to search_v2 (scope='{searchScope}', pattern='{pattern}')");
-                        var found = service.SearchByFilenameAsync(pattern, searchScope, 1000)
+                        var found = service.SearchByFilenameAsync(pattern, searchScope)
                             .GetAwaiter().GetResult();
                         foreach (var item in found.Where(ItemKindMatches).OrderBy(i => !i.IsFolder).ThenBy(i => i.Name))
                         {

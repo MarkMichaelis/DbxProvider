@@ -9,7 +9,7 @@ schema: 2.0.0
 
 ## SYNOPSIS
 
-Finds Dropbox "conflicted copy" files, using a saved cursor to make repeat scans cheap.
+Finds Dropbox "conflicted copy" files fast, using the indexed search_v2 endpoint.
 
 ## SYNTAX
 
@@ -21,16 +21,21 @@ Find-DropboxConflict [[-Path] <String>] [-Pattern <String>] [-IncludeNonZero] [-
 ## DESCRIPTION
 
 Scans a Dropbox subtree for zero-byte (or, with `-IncludeNonZero`, all)
-"conflicted copy" files. The first run does a full recursive enumeration and
-persists the resulting account cursor and match set to a JSON sidecar file.
-Subsequent runs fetch only the delta (adds, updates, removes) since that cursor
-instead of re-walking the whole tree, which makes repeat scans dramatically
-cheaper on large accounts.
+"conflicted copy" files. A cold run uses the indexed `files/search_v2` endpoint
+by default -- the same fast path the Dropbox website uses -- instead of walking
+the whole subtree, so the common case is quick even on large accounts. When a
+search scope hits the search_v2 result ceiling, the scan subdivides into child
+folders and unions the results so the answer stays exhaustive.
 
-The scan transparently falls back to a full pass when the saved cursor is
-rejected by Dropbox (expired/reset) or when any scan parameter (`-Path`,
-`-Pattern`, `-IncludeNonZero`, or the account) differs from the saved state.
-Pass `-Full` to ignore saved state and force a full enumeration.
+When a reusable saved cursor exists (established by a prior `-Full` run), later
+runs fetch only the delta (adds, updates, removes) since that cursor. The delta
+path transparently falls back to a full pass when the cursor is rejected by
+Dropbox (expired/reset) or when any scan parameter (`-Path`, `-Pattern`,
+`-IncludeNonZero`, or the account) differs from the saved state.
+
+Pass `-Full` to force an authoritative recursive enumeration (guaranteed
+complete) that also (re)establishes the incremental cursor. Search-based cold
+runs do not produce a recursive cursor, so a subsequent run searches again.
 
 Each match is emitted as an object with `Path` and `Bytes` properties, so the
 results compose directly with `Remove-DropboxItemBatch`.
@@ -38,13 +43,15 @@ results compose directly with `Remove-DropboxItemBatch`.
 ## EXAMPLES
 
 ### Example 1
+
 ```powershell
 PS> Find-DropboxConflict
 ```
 
-Scans the whole drive. The first run is a full pass; later runs are incremental.
+Scans the whole drive using the fast search_v2 discovery path.
 
 ### Example 2
+
 ```powershell
 PS> Find-DropboxConflict -Path 'Dbx:\Projects' | Remove-DropboxItemBatch -WhatIf
 ```
@@ -52,11 +59,13 @@ PS> Find-DropboxConflict -Path 'Dbx:\Projects' | Remove-DropboxItemBatch -WhatIf
 Scans just the `Projects` subtree and previews deleting the matches.
 
 ### Example 3
+
 ```powershell
 PS> Find-DropboxConflict -Full -IncludeNonZero
 ```
 
-Forces a full re-enumeration and also captures non-zero-byte conflict files.
+Forces an exhaustive recursive enumeration (establishing an incremental cursor)
+and also captures non-zero-byte conflict files.
 
 ## PARAMETERS
 
@@ -130,8 +139,10 @@ Accept wildcard characters: False
 
 ### -Full
 
-Ignore any saved state and force a full recursive enumeration, then save fresh
-state for the next incremental run.
+Force an authoritative recursive enumeration (ignoring any saved state), then
+save a fresh incremental cursor for later delta runs. Use this when you need a
+guaranteed-complete pass or want to (re)establish the incremental cursor. The
+default cold run uses the faster search_v2 discovery path instead.
 
 ```yaml
 Type: SwitchParameter

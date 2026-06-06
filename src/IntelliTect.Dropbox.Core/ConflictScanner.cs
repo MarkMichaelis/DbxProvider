@@ -131,6 +131,48 @@ namespace IntelliTect.Dropbox
                 .ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// Discovers conflict files using the indexed search_v2 endpoint instead
+        /// of a full recursive walk. This is the fast cold-discovery path: it
+        /// delegates to the shared, exhaustive and cap-safe
+        /// <see cref="DropboxServiceClient.SearchByFilenameAsync"/> (which pages
+        /// the search and subdivides into child folders at the result ceiling),
+        /// then applies only the conflict concerns: the zero-byte rule (unless
+        /// <see cref="ConflictScanParameters.IncludeNonZero"/>) and building the
+        /// match set. The returned state carries an empty cursor (search yields
+        /// no recursive cursor), so the next run searches again.
+        /// </summary>
+        public async Task<ConflictScanResult> SearchScanAsync(
+            ConflictScanParameters parameters, CancellationToken cancellationToken = default)
+        {
+            if (parameters is null) throw new System.ArgumentNullException(nameof(parameters));
+
+            var account = await _service.GetCurrentAccountAsync(cancellationToken).ConfigureAwait(false);
+            var startPath = DropboxServiceClient.NormalizePath(parameters.StartPath);
+
+            var found = await _service
+                .SearchByFilenameAsync(parameters.Pattern, startPath, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+
+            var matches = new Dictionary<string, ConflictMatch>(System.StringComparer.Ordinal);
+            foreach (var item in found)
+            {
+                if (parameters.IncludeNonZero || item.Length == 0)
+                    matches[item.Path.ToLowerInvariant()] = new ConflictMatch { Path = item.Path, Bytes = item.Length };
+            }
+
+            var state = new ConflictScanState
+            {
+                AccountId = account.AccountId,
+                StartPath = startPath,
+                Pattern = parameters.Pattern,
+                IncludeNonZero = parameters.IncludeNonZero,
+                Cursor = string.Empty,
+                Matches = matches,
+            };
+            return new ConflictScanResult(matches.Values.ToList(), state, wasFullScan: false);
+        }
+
         private static bool CanReuse(ConflictScanState? state, ConflictScanParameters p, string startPath, string accountId) =>
             state is not null
             && !string.IsNullOrEmpty(state.Cursor)
