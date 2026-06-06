@@ -79,6 +79,40 @@ public class FakeDropboxServiceClient : DropboxServiceClient
         return Task.FromResult(_scriptedDeltas.Dequeue());
     }
 
+    /// <summary>Revision history returned by <see cref="ListRevisionsAsync"/>, keyed
+    /// by normalized path. Paths not present return an empty list.</summary>
+    public Dictionary<string, List<DropboxRevision>> RevisionsByPath { get; } =
+        new(System.StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Returns the entire matching subtree as a single page so
+    /// <c>Build-DropboxCache</c> can be driven without the real API.</summary>
+    public override Task<ListFolderPage> ListFolderFirstPageAsync(
+        string path, bool recursive = false, bool includeDeleted = false,
+        bool includeMediaInfo = false, bool includeHasExplicitSharedMembers = false,
+        CancellationToken cancellationToken = default)
+    {
+        System.Threading.Interlocked.Increment(ref _fullListCalls);
+        var norm = NormalizePath(path);
+        var page = new ListFolderPage { Cursor = _fullCursor, HasMore = false };
+        foreach (var item in _items.Where(i =>
+                     recursive ? IsUnder(i.Path, norm) && i.Path != norm : Parent(i.Path) == norm))
+        {
+            page.Items.Add(item);
+        }
+        return Task.FromResult(page);
+    }
+
+    /// <summary>Returns the scripted revision history for a file, or an empty list.</summary>
+    public override Task<List<DropboxRevision>> ListRevisionsAsync(
+        string path, int limit = 10, CancellationToken cancellationToken = default)
+    {
+        var norm = NormalizePath(path);
+        return Task.FromResult(
+            RevisionsByPath.TryGetValue(norm, out var revisions)
+                ? revisions
+                : new List<DropboxRevision>());
+    }
+
     public override Task<DropboxItem> UploadAsync(string path, System.IO.Stream content, WriteMode? mode = null, CancellationToken cancellationToken = default)
     {
         var norm = NormalizePath(path);

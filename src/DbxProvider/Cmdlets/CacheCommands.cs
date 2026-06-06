@@ -100,6 +100,78 @@ namespace DbxProvider.Cmdlets
             Run(ct => cache.UpdateAsync(Path, cancellationToken: ct));
         }
     }
+
+    /// <summary>
+    /// Pre-populates the Dropbox metadata cache for a subtree by walking a
+    /// recursive listing page by page (resumable across interruptions), and
+    /// optionally caches each file's revision history with
+    /// <see cref="IncludeRevisions"/>.
+    /// </summary>
+    [Cmdlet(VerbsLifecycle.Build, "DropboxCache", SupportsShouldProcess = true)]
+    [OutputType(typeof(PSObject))]
+    public class BuildDropboxCacheCommand : DropboxCmdletBase
+    {
+        /// <summary>Subtree root to build. Defaults to the account root.</summary>
+        [Parameter(Position = 0)]
+        public string Path { get; set; } = "/";
+
+        /// <summary>Also fetch and cache each file's revision history.</summary>
+        [Parameter]
+        public SwitchParameter IncludeRevisions { get; set; }
+
+        protected override void ProcessRecord()
+        {
+            var cache = CacheCmdletHelpers.GetCache(this, DriveName);
+            if (!cache.Options.Enabled)
+            {
+                WriteWarning($"Metadata cache is disabled on drive '{DriveName}:'. Nothing to build.");
+                return;
+            }
+
+            if (!ShouldProcess($"{DriveName}:{Path}", "Build metadata cache"))
+                return;
+
+            var result = Run(ct => cache.BuildAsync(Path, ct));
+            if (IncludeRevisions.IsPresent)
+                BuildRevisions(cache, result);
+
+            WriteObject(BuildSummary(result));
+        }
+
+        private void BuildRevisions(MetadataCache cache, MetadataCache.BuildResult result)
+        {
+            var revisions = Run(ct => cache.BuildRevisionsAsync(Path, ReportRevisionProgress, null, ct));
+            result.FilesWithRevisionsCached = revisions.FilesWithRevisionsCached;
+            result.RevisionsCached = revisions.RevisionsCached;
+            WriteProgress(new ProgressRecord(1, "Caching revisions", "Complete")
+            {
+                RecordType = ProgressRecordType.Completed
+            });
+        }
+
+        private void ReportRevisionProgress(int processed, int total)
+        {
+            var percent = total == 0 ? 100 : (int)(100.0 * processed / total);
+            EnqueueWrite(() => WriteProgress(
+                new ProgressRecord(1, "Caching revisions", $"{processed} of {total} files")
+                {
+                    PercentComplete = Math.Min(100, Math.Max(0, percent))
+                }));
+        }
+
+        private PSObject BuildSummary(MetadataCache.BuildResult result)
+        {
+            var summary = new PSObject();
+            summary.Properties.Add(new PSNoteProperty("DriveName", DriveName));
+            summary.Properties.Add(new PSNoteProperty("Path", Path));
+            summary.Properties.Add(new PSNoteProperty("FoldersCached", result.FoldersCached));
+            summary.Properties.Add(new PSNoteProperty("ItemsFound", result.ItemsFound));
+            summary.Properties.Add(new PSNoteProperty("FilesWithRevisionsCached", result.FilesWithRevisionsCached));
+            summary.Properties.Add(new PSNoteProperty("RevisionsCached", result.RevisionsCached));
+            return summary;
+        }
+    }
+
     [Cmdlet(VerbsCommon.Set, "DropboxCacheOption")]
     public class SetDropboxCacheOptionCommand : PSCmdlet
     {
