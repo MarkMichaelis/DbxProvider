@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <!-- The solution targets net8.0 because the DbxProvider PowerShell binary
+         module must load in PowerShell 7.4 (which runs on .NET 8). On machines
+         where only the .NET 10 runtime is installed, roll forward across the
+         major version so `dotnet test` runs without a standalone .NET 8 runtime
+         and without requiring the DOTNET_ROLL_FORWARD environment variable.
+         This is a no-op when a matching runtime is present (e.g. CI). -->
+    <RollForward>Major</RollForward>
+  </PropertyGroup>
+</Project>
