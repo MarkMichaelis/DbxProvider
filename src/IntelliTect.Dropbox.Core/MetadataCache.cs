@@ -238,95 +238,247 @@ namespace IntelliTect.Dropbox
             return entry.Items.ToList();
         }
 
-        /// <summary>Outcome of a <see cref="BuildAsync"/> pre-population pass.</summary>
+        /// <summary>Outcome of a <see cref="BuildAsync"/> (and optional
+        /// <see cref="BuildRevisionsAsync"/>) pre-population pass.</summary>
         public sealed class BuildResult
         {
-            /// <summary>Number of per-folder cache entries created or refreshed.</summary>
+            /// <summary>Number of per-folder cache entries created or refreshed
+            /// during this invocation.</summary>
             public int FoldersCached { get; set; }
 
-            /// <summary>Total number of descendant items returned by the
-            /// recursive listing.</summary>
+            /// <summary>Number of descendant items processed during this
+            /// invocation. For a resumed build this counts only the items in the
+            /// pages walked this call, not pages persisted by an earlier run.</summary>
+            public int ItemsFound { get; set; }
+
+            /// <summary>Number of files whose revision history was fetched and
+            /// cached. Populated only by <see cref="BuildRevisionsAsync"/>.</summary>
+            public int FilesWithRevisionsCached { get; set; }
+
+            /// <summary>Total number of revision rows cached across all files.
+            /// Populated only by <see cref="BuildRevisionsAsync"/>.</summary>
+            public int RevisionsCached { get; set; }
+        }
+
+        /// <summary>Per-invocation accumulator for a subtree build (page-by-page).</summary>
+        private sealed class BuildState
+        {
+            public BuildState(string rootPath)
+            {
+                RootPath = rootPath;
+                RootKey = MakeKey(rootPath);
+                Folders.Add(RootKey);
+            }
+
+            public string RootPath { get; }
+            public string RootKey { get; }
+            public HashSet<string> Folders { get; } = new(StringComparer.OrdinalIgnoreCase);
             public int ItemsFound { get; set; }
         }
 
+        /// <summary>Persisted state of an in-progress or completed subtree build.</summary>
+        private sealed class BuildProgress
+        {
+            public BuildProgress(string cursor, bool complete)
+            {
+                Cursor = cursor;
+                Complete = complete;
+            }
+
+            public string Cursor { get; }
+            public bool Complete { get; }
+        }
+
+        /// <summary>Default staleness window for revision re-fetch: a file's
+        /// revisions are refreshed only when its last fetch is older than this.</summary>
+        private static readonly TimeSpan DefaultRevisionMaxAge = TimeSpan.FromHours(24);
+
         /// <summary>
-        /// Pre-populates the cache for an entire subtree using a single
-        /// recursive <c>list_folder</c>. The flat result is grouped by parent
-        /// folder and each group is stored as a per-folder entry. Because a
-        /// recursive listing yields only one subtree cursor (not per-folder
-        /// cursors), the created entries start with an empty cursor; each
-        /// acquires a real per-folder cursor on its first validated read.
+        /// Pre-populates the cache for an entire subtree by walking a recursive
+        /// <c>list_folder</c> one page at a time, grouping each page by parent
+        /// folder and flushing to SQLite after every page. The in-progress
+        /// cursor is persisted so an interrupted build resumes from the last
+        /// completed page on the next call. Enriched metadata is requested at no
+        /// extra request cost.
         /// </summary>
         public async Task<BuildResult> BuildAsync(string path, CancellationToken cancellationToken = default)
         {
             if (!_options.Enabled) return new BuildResult();
 
-            var rootPath = DropboxServiceClient.NormalizePath(path);
-            var items = await _service.ListFolderAsync(rootPath, recursive: true,
-                cancellationToken: cancellationToken);
+            var state = new BuildState(DropboxServiceClient.NormalizePath(path));
+            var saved = LoadBuildProgress(state.RootKey);
+            if (saved is { Complete: false } && saved.Cursor.Length > 0)
+                await ContinueBuildAsync(state, saved.Cursor, cancellationToken);
+            else
+                await FreshBuildAsync(state, cancellationToken);
 
-            var childrenByFolder = GroupByParentFolder(items, rootPath);
-            var now = DateTime.UtcNow;
-            foreach (var pair in childrenByFolder)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                StoreBuiltEntry(pair.Key, pair.Value, now);
-            }
-
-            Flush();
             EvictIfOverBudget();
             return new BuildResult
             {
-                FoldersCached = childrenByFolder.Count,
-                ItemsFound = items.Count
+                FoldersCached = state.Folders.Count,
+                ItemsFound = state.ItemsFound
             };
+        }
+
+        /// <summary>Starts a build from the first page of a recursive listing,
+        /// requesting enriched metadata at no extra request cost.</summary>
+        private async Task FreshBuildAsync(BuildState state, CancellationToken ct)
+        {
+            GetOrCreateBuildEntry(state.RootKey, state.RootPath);
+            SaveBuildProgress(state.RootKey, cursor: "", complete: false);
+
+            var page = await _service.ListFolderFirstPageAsync(state.RootPath, recursive: true,
+                includeMediaInfo: true, includeHasExplicitSharedMembers: true,
+                cancellationToken: ct);
+
+            ProcessPage(state, page.Items, page.Cursor, complete: !page.HasMore);
+            if (page.HasMore) await ContinueBuildAsync(state, page.Cursor, ct);
+        }
+
+        /// <summary>Continues a build from a saved cursor, restarting cleanly when
+        /// Dropbox signals that the cursor is no longer valid.</summary>
+        private async Task ContinueBuildAsync(BuildState state, string cursor, CancellationToken ct)
+        {
+            while (true)
+            {
+                ct.ThrowIfCancellationRequested();
+                var delta = await _service.ListFolderContinueRawAsync(cursor, ct);
+                if (delta.ResetRequired)
+                {
+                    await FreshBuildAsync(state, ct);
+                    return;
+                }
+
+                ProcessPage(state, delta.AddsOrUpdates, delta.NewCursor, complete: !delta.HasMore);
+                cursor = delta.NewCursor;
+                if (!delta.HasMore) return;
+            }
+        }
+
+        /// <summary>Merges one page into the in-memory entries and flushes the
+        /// page plus the advanced cursor to SQLite in a single transaction.</summary>
+        private void ProcessPage(BuildState state, List<DropboxItem> items, string cursor, bool complete)
+        {
+            foreach (var item in items) MergeBuildItem(state, item);
+            PersistBuildPage(state.RootKey, cursor, complete);
+        }
+
+        /// <summary>Adds a single listed item to its parent folder entry and, when
+        /// the item is itself a folder, ensures an entry exists for it too.</summary>
+        private void MergeBuildItem(BuildState state, DropboxItem item)
+        {
+            state.ItemsFound++;
+            var parentKey = BuildParentKey(item.Path, state.RootPath);
+            var parent = GetOrCreateBuildEntry(parentKey, BuildParentDisplay(item.Path, state.RootPath));
+            ApplyAddTo(parent, item);
+            parent.Dirty = true;
+            state.Folders.Add(parentKey);
+            if (!item.IsFolder) return;
+
+            GetOrCreateBuildEntry(MakeKey(item.Path), item.Path);
+            state.Folders.Add(MakeKey(item.Path));
+        }
+
+        /// <summary>Resolves the cache key of the folder that owns an item.</summary>
+        private static string BuildParentKey(string path, string rootPath)
+        {
+            var parent = ParentOf(path);
+            return MakeKey(string.IsNullOrEmpty(parent) ? rootPath : parent);
+        }
+
+        /// <summary>Resolves the display path of the folder that owns an item.</summary>
+        private static string BuildParentDisplay(string path, string rootPath)
+        {
+            var parent = ParentOf(path);
+            return string.IsNullOrEmpty(parent) ? rootPath : parent;
+        }
+
+        /// <summary>Returns the in-memory entry for a folder, hydrating it from
+        /// disk or creating a fresh empty entry when absent.</summary>
+        private Entry GetOrCreateBuildEntry(string key, string displayPath)
+        {
+            if (_entries.TryGetValue(key, out var existing)) return existing;
+            if (TryLoadFromDisk(key, out var loaded) && loaded != null)
+            {
+                _entries[key] = loaded;
+                return loaded;
+            }
+
+            var now = DateTime.UtcNow;
+            var entry = new Entry
+            {
+                Path = displayPath,
+                PathLower = key,
+                Cursor = "",
+                Items = new List<DropboxItem>(),
+                LastValidatedUtc = now,
+                LastUsedUtc = now,
+                Dirty = true
+            };
+            _entries[key] = entry;
+            return entry;
         }
 
         /// <summary>
-        /// Groups a flat recursive listing into per-folder child lists. Every
-        /// folder in the subtree (the root plus each discovered folder item)
-        /// gets a list, so empty folders are warmed too. Keys are display paths.
+        /// Fetches and caches the revision history of every file in a subtree.
+        /// Files whose revisions were fetched within <paramref name="maxAge"/>
+        /// are skipped, so an interrupted pass resumes cheaply.
         /// </summary>
-        private static Dictionary<string, List<DropboxItem>> GroupByParentFolder(
-            IEnumerable<DropboxItem> items, string rootPath)
+        public async Task<BuildResult> BuildRevisionsAsync(string path,
+            Action<int, int>? onProgress = null, TimeSpan? maxAge = null,
+            CancellationToken cancellationToken = default)
         {
-            var byFolder = new Dictionary<string, List<DropboxItem>>(StringComparer.OrdinalIgnoreCase)
-            {
-                [rootPath] = new List<DropboxItem>()
-            };
+            if (!_options.Enabled) return new BuildResult();
 
-            foreach (var item in items)
+            var rootPath = DropboxServiceClient.NormalizePath(path);
+            var files = CollectSubtreeFiles(rootPath);
+            var staleness = maxAge ?? DefaultRevisionMaxAge;
+            var result = new BuildResult();
+            for (int i = 0; i < files.Count; i++)
             {
-                if (item.IsFolder && !byFolder.ContainsKey(item.Path))
-                    byFolder[item.Path] = new List<DropboxItem>();
-
-                var parent = ParentOf(item.Path) ?? rootPath;
-                if (!byFolder.TryGetValue(parent, out var list))
-                {
-                    list = new List<DropboxItem>();
-                    byFolder[parent] = list;
-                }
-                list.Add(item);
+                cancellationToken.ThrowIfCancellationRequested();
+                onProgress?.Invoke(i, files.Count);
+                await EnrichFileRevisionsAsync(files[i], staleness, result, cancellationToken);
             }
 
-            return byFolder;
+            onProgress?.Invoke(files.Count, files.Count);
+            return result;
         }
 
-        /// <summary>Stores a recursively-built folder entry with an empty cursor
-        /// so it acquires a real per-folder cursor on its first validated read.</summary>
-        private void StoreBuiltEntry(string folderPath, List<DropboxItem> children, DateTime timestamp)
+        /// <summary>Fetches and persists revisions for one file unless a recent
+        /// fetch already satisfies the staleness window.</summary>
+        private async Task EnrichFileRevisionsAsync(string filePath, TimeSpan staleness,
+            BuildResult result, CancellationToken ct)
         {
-            var entry = new Entry
+            var key = MakeKey(filePath);
+            if (IsRevisionFresh(key, staleness)) return;
+
+            var revisions = await _service.ListRevisionsAsync(filePath, cancellationToken: ct);
+            PersistRevisions(key, revisions);
+            result.FilesWithRevisionsCached++;
+            result.RevisionsCached += revisions.Count;
+        }
+
+        /// <summary>Walks the cached subtree depth-first and returns every file
+        /// path, skipping folders.</summary>
+        private List<string> CollectSubtreeFiles(string rootPath)
+        {
+            var files = new List<string>();
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var pending = new Stack<string>();
+            pending.Push(rootPath);
+            while (pending.Count > 0)
             {
-                Path = folderPath,
-                PathLower = MakeKey(folderPath),
-                Cursor = "",
-                Items = children,
-                LastValidatedUtc = timestamp,
-                LastUsedUtc = timestamp,
-                Dirty = true
-            };
-            _entries[entry.PathLower] = entry;
+                var folder = pending.Pop();
+                if (!visited.Add(MakeKey(folder)) || !TryGet(folder, out var entry) || entry == null) continue;
+                foreach (var item in entry.Items)
+                {
+                    if (item.IsFolder) pending.Push(item.Path);
+                    else files.Add(item.Path);
+                }
+            }
+
+            return files;
         }
 
         /// <summary>Returns the cached entry for <paramref name="path"/> without
@@ -535,6 +687,27 @@ namespace IntelliTect.Dropbox
                     "  item_count INTEGER NOT NULL," +
                     "  last_validated_utc TEXT NOT NULL," +
                     "  last_used_utc TEXT NOT NULL" +
+                    ");" +
+                    "CREATE TABLE IF NOT EXISTS build_progress (" +
+                    "  root_path_lower TEXT PRIMARY KEY," +
+                    "  cursor TEXT NOT NULL," +
+                    "  updated_utc TEXT NOT NULL," +
+                    "  complete INTEGER NOT NULL DEFAULT 0" +
+                    ");" +
+                    "CREATE TABLE IF NOT EXISTS revisions (" +
+                    "  path_lower TEXT NOT NULL," +
+                    "  rev TEXT NOT NULL," +
+                    "  length INTEGER NOT NULL," +
+                    "  content_hash TEXT NOT NULL," +
+                    "  server_modified TEXT NOT NULL," +
+                    "  client_modified TEXT NOT NULL," +
+                    "  is_deleted INTEGER NOT NULL DEFAULT 0," +
+                    "  fetched_utc TEXT NOT NULL," +
+                    "  PRIMARY KEY (path_lower, rev)" +
+                    ");" +
+                    "CREATE TABLE IF NOT EXISTS revision_progress (" +
+                    "  path_lower TEXT PRIMARY KEY," +
+                    "  fetched_utc TEXT NOT NULL" +
                     ");";
                 pragma.ExecuteNonQuery();
             }
@@ -644,6 +817,143 @@ namespace IntelliTect.Dropbox
             try { Flush(); } catch { /* best effort */ }
         }
 
+        /// <summary>Loads the persisted build progress for a subtree root, or
+        /// <c>null</c> when no build has been recorded.</summary>
+        private BuildProgress? LoadBuildProgress(string rootKey)
+        {
+            lock (_diskLock)
+            {
+                using var cmd = _db.CreateCommand();
+                cmd.CommandText =
+                    "SELECT cursor, complete FROM build_progress WHERE root_path_lower = $k;";
+                cmd.Parameters.AddWithValue("$k", rootKey);
+                using var reader = cmd.ExecuteReader();
+                if (!reader.Read()) return null;
+                return new BuildProgress(reader.GetString(0), reader.GetInt64(1) != 0);
+            }
+        }
+
+        /// <summary>Indicates whether a completed build is recorded for a path.</summary>
+        public bool IsBuildComplete(string path) =>
+            LoadBuildProgress(MakeKey(DropboxServiceClient.NormalizePath(path))) is { Complete: true };
+
+        /// <summary>Persists the build progress row for a subtree root.</summary>
+        private void SaveBuildProgress(string rootKey, string cursor, bool complete)
+        {
+            lock (_diskLock)
+            {
+                UpsertBuildProgress(rootKey, cursor, complete);
+            }
+        }
+
+        /// <summary>Inserts or updates the build progress row. The caller holds
+        /// the disk lock; any active transaction is auto-enlisted.</summary>
+        private void UpsertBuildProgress(string rootKey, string cursor, bool complete)
+        {
+            using var cmd = _db.CreateCommand();
+            cmd.CommandText =
+                "INSERT INTO build_progress (root_path_lower, cursor, updated_utc, complete) " +
+                "VALUES ($k, $c, $u, $done) " +
+                "ON CONFLICT(root_path_lower) DO UPDATE SET " +
+                "  cursor=excluded.cursor, updated_utc=excluded.updated_utc, complete=excluded.complete;";
+            cmd.Parameters.AddWithValue("$k", rootKey);
+            cmd.Parameters.AddWithValue("$c", cursor);
+            cmd.Parameters.AddWithValue("$u", FormatUtc(DateTime.UtcNow));
+            cmd.Parameters.AddWithValue("$done", complete ? 1 : 0);
+            cmd.ExecuteNonQuery();
+        }
+
+        /// <summary>Flushes the dirty entries accumulated for one page and the
+        /// advanced cursor to SQLite in a single transaction.</summary>
+        private void PersistBuildPage(string rootKey, string cursor, bool complete)
+        {
+            lock (_diskLock)
+            {
+                using var tx = _db.BeginTransaction();
+                foreach (var entry in _entries.Values)
+                {
+                    if (!entry.Dirty) continue;
+                    UpsertEntry(entry);
+                    entry.Dirty = false;
+                }
+                UpsertBuildProgress(rootKey, cursor, complete);
+                tx.Commit();
+            }
+        }
+
+        /// <summary>Indicates whether a file's revisions were fetched recently
+        /// enough to skip re-fetching.</summary>
+        private bool IsRevisionFresh(string fileKey, TimeSpan maxAge)
+        {
+            lock (_diskLock)
+            {
+                using var cmd = _db.CreateCommand();
+                cmd.CommandText =
+                    "SELECT fetched_utc FROM revision_progress WHERE path_lower = $k;";
+                cmd.Parameters.AddWithValue("$k", fileKey);
+                if (cmd.ExecuteScalar() is not string value) return false;
+                return DateTime.UtcNow - ParseUtc(value) < maxAge;
+            }
+        }
+
+        /// <summary>Persists the revisions of one file and records the fetch time
+        /// in a single transaction.</summary>
+        private void PersistRevisions(string fileKey, List<DropboxRevision> revisions)
+        {
+            lock (_diskLock)
+            {
+                using var tx = _db.BeginTransaction();
+                foreach (var revision in revisions) UpsertRevision(fileKey, revision);
+                UpsertRevisionProgress(fileKey);
+                tx.Commit();
+            }
+        }
+
+        /// <summary>Inserts or updates a single revision row.</summary>
+        private void UpsertRevision(string fileKey, DropboxRevision revision)
+        {
+            using var cmd = _db.CreateCommand();
+            cmd.CommandText =
+                "INSERT INTO revisions (path_lower, rev, length, content_hash, server_modified, client_modified, is_deleted, fetched_utc) " +
+                "VALUES ($k, $r, $len, $hash, $sm, $cm, $del, $f) " +
+                "ON CONFLICT(path_lower, rev) DO UPDATE SET " +
+                "  length=excluded.length, content_hash=excluded.content_hash, " +
+                "  server_modified=excluded.server_modified, client_modified=excluded.client_modified, " +
+                "  is_deleted=excluded.is_deleted, fetched_utc=excluded.fetched_utc;";
+            cmd.Parameters.AddWithValue("$k", fileKey);
+            cmd.Parameters.AddWithValue("$r", revision.Rev);
+            cmd.Parameters.AddWithValue("$len", (long)revision.Length);
+            cmd.Parameters.AddWithValue("$hash", revision.ContentHash);
+            cmd.Parameters.AddWithValue("$sm", FormatUtcNullable(revision.ServerModified));
+            cmd.Parameters.AddWithValue("$cm", FormatUtcNullable(revision.ClientModified));
+            cmd.Parameters.AddWithValue("$del", revision.IsDeleted ? 1 : 0);
+            cmd.Parameters.AddWithValue("$f", FormatUtc(DateTime.UtcNow));
+            cmd.ExecuteNonQuery();
+        }
+
+        /// <summary>Inserts or updates the revision fetch marker for a file.</summary>
+        private void UpsertRevisionProgress(string fileKey)
+        {
+            using var cmd = _db.CreateCommand();
+            cmd.CommandText =
+                "INSERT INTO revision_progress (path_lower, fetched_utc) VALUES ($k, $f) " +
+                "ON CONFLICT(path_lower) DO UPDATE SET fetched_utc=excluded.fetched_utc;";
+            cmd.Parameters.AddWithValue("$k", fileKey);
+            cmd.Parameters.AddWithValue("$f", FormatUtc(DateTime.UtcNow));
+            cmd.ExecuteNonQuery();
+        }
+
+        /// <summary>Returns the total number of cached revision rows.</summary>
+        public long RevisionCount()
+        {
+            lock (_diskLock)
+            {
+                using var cmd = _db.CreateCommand();
+                cmd.CommandText = "SELECT COUNT(*) FROM revisions;";
+                return (long)(cmd.ExecuteScalar() ?? 0L);
+            }
+        }
+
         public void Dispose()
         {
             if (_disposed) return;
@@ -672,6 +982,9 @@ namespace IntelliTect.Dropbox
 
         private static string FormatUtc(DateTime value) =>
             value.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture);
+
+        private static string FormatUtcNullable(DateTime? value) =>
+            value.HasValue ? FormatUtc(value.Value) : "";
 
         private static DateTime ParseUtc(string value) =>
             DateTime.TryParse(value, CultureInfo.InvariantCulture,
