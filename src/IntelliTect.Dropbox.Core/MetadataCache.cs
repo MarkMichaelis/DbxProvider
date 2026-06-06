@@ -383,14 +383,14 @@ namespace IntelliTect.Dropbox
         private static string BuildParentKey(string path, string rootPath)
         {
             var parent = ParentOf(path);
-            return MakeKey(string.IsNullOrEmpty(parent) ? rootPath : parent);
+            return MakeKey(string.IsNullOrEmpty(parent) ? rootPath : parent!);
         }
 
         /// <summary>Resolves the display path of the folder that owns an item.</summary>
         private static string BuildParentDisplay(string path, string rootPath)
         {
             var parent = ParentOf(path);
-            return string.IsNullOrEmpty(parent) ? rootPath : parent;
+            return string.IsNullOrEmpty(parent) ? rootPath : parent!;
         }
 
         /// <summary>Returns the in-memory entry for a folder, hydrating it from
