@@ -108,7 +108,8 @@ public class ConflictSearchScanTests
             Conflict("/A/z's conflicted copy.txt"),       // only found via subdivision
         });
         fake.EnqueueSearchPage("/B", new[] { Conflict("/B/y's conflicted copy.txt") });
-        var scanner = new ConflictScanner(fake, searchResultCeiling: 2);
+        fake.SearchResultCeiling = 2;
+        var scanner = new ConflictScanner(fake);
 
         var result = await scanner.SearchScanAsync(Params());
 
