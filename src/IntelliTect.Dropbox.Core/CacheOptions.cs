@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace IntelliTect.Dropbox
 {
@@ -37,6 +38,34 @@ namespace IntelliTect.Dropbox
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "DbxProvider", "cache");
 
-        public static CacheOptions Default { get; } = new CacheOptions();
+        /// <summary>
+        /// Per-account override of the metadata cache database file path, keyed
+        /// by Dropbox account email. Lookups ignore case. When a connecting
+        /// account's email has an entry here, its cache database is placed at
+        /// exactly that path (after <c>~</c>/environment-variable expansion)
+        /// instead of the default <c>&lt;cacheRoot&gt;\DropboxCache.&lt;email&gt;.db</c>.
+        /// The concrete mapping is user runtime configuration; it is never baked
+        /// into the library.
+        /// </summary>
+        public IDictionary<string, string> EmailDatabasePathOverrides { get; } =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Process-wide options instance. Persisted per-email database path
+        /// overrides (see <see cref="CacheConfigStore"/>) are loaded into this
+        /// instance on first access so they survive across PowerShell sessions.
+        /// </summary>
+        public static CacheOptions Default { get; } = CreateDefault();
+
+        private static CacheOptions CreateDefault()
+        {
+            var options = new CacheOptions();
+            foreach (var pair in CacheConfigStore.Default.LoadOverrides())
+            {
+                options.EmailDatabasePathOverrides[pair.Key] = pair.Value;
+            }
+
+            return options;
+        }
     }
 }
