@@ -29,6 +29,7 @@
     <InternalsVisibleTo Include="DbxProvider" />
     <InternalsVisibleTo Include="DbxProvider.UnitTests" />
     <InternalsVisibleTo Include="DbxProvider.FunctionalTests" />
+    <InternalsVisibleTo Include="DbxProvider.ProviderHostTests" />
   </ItemGroup>
 
   <ItemGroup>

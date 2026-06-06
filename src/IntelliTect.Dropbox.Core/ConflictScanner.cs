@@ -100,12 +100,31 @@ namespace IntelliTect.Dropbox
     /// </summary>
     public sealed class ConflictScanner
     {
+        /// <summary>
+        /// Number of results a single search_v2 scope may return before the API
+        /// stops yielding more. When a scope reaches this ceiling the scan
+        /// subdivides into child folders to stay exhaustive.
+        /// </summary>
+        private const int DefaultSearchResultCeiling = 10000;
+
         private readonly DropboxServiceClient _service;
+        private readonly int _searchResultCeiling;
 
         /// <summary>Creates a scanner over the supplied Dropbox service client.</summary>
         public ConflictScanner(DropboxServiceClient service)
+            : this(service, DefaultSearchResultCeiling)
+        {
+        }
+
+        /// <summary>
+        /// Creates a scanner with an explicit search ceiling. Used by tests to
+        /// exercise the folder-subdivision path without enumerating thousands of
+        /// results.
+        /// </summary>
+        internal ConflictScanner(DropboxServiceClient service, int searchResultCeiling)
         {
             _service = service ?? throw new System.ArgumentNullException(nameof(service));
+            _searchResultCeiling = searchResultCeiling;
         }
 
         /// <summary>
@@ -129,6 +148,104 @@ namespace IntelliTect.Dropbox
 
             return await IncrementalScanAsync(parameters, startPath, account.AccountId, matcher, previousState!, cancellationToken)
                 .ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Discovers conflict files using the indexed search_v2 endpoint instead
+        /// of a full recursive walk. This is the fast cold-discovery path: it
+        /// runs a <c>filenameOnly</c> search derived from
+        /// <see cref="ConflictScanParameters.Pattern"/>, post-filters every hit
+        /// with the wildcard pattern and the zero-byte rule, and subdivides into
+        /// child folders when a scope reaches the search_v2 result ceiling so the
+        /// result stays exhaustive. The returned state carries an empty cursor
+        /// (search yields no recursive cursor), so the next run searches again.
+        /// </summary>
+        public async Task<ConflictScanResult> SearchScanAsync(
+            ConflictScanParameters parameters, CancellationToken cancellationToken = default)
+        {
+            if (parameters is null) throw new System.ArgumentNullException(nameof(parameters));
+
+            var account = await _service.GetCurrentAccountAsync(cancellationToken).ConfigureAwait(false);
+            var startPath = DropboxServiceClient.NormalizePath(parameters.StartPath);
+            var matcher = new WildcardMatcher(parameters.Pattern);
+            var query = DeriveSearchQuery(parameters.Pattern);
+
+            var matches = new Dictionary<string, ConflictMatch>(System.StringComparer.Ordinal);
+            await SearchScopeAsync(query, startPath, matcher, parameters.IncludeNonZero, matches, cancellationToken)
+                .ConfigureAwait(false);
+
+            var state = new ConflictScanState
+            {
+                AccountId = account.AccountId,
+                StartPath = startPath,
+                Pattern = parameters.Pattern,
+                IncludeNonZero = parameters.IncludeNonZero,
+                Cursor = string.Empty,
+                Matches = matches,
+            };
+            return new ConflictScanResult(matches.Values.ToList(), state, wasFullScan: false);
+        }
+
+        /// <summary>
+        /// Derives a search_v2 token query from a PowerShell wildcard pattern by
+        /// splitting on wildcard and separator characters and keeping tokens of
+        /// at least two characters (the default pattern yields "conflicted copy").
+        /// </summary>
+        private static string DeriveSearchQuery(string pattern)
+        {
+            var tokens = pattern
+                .Split(new[] { '*', '?', '[', ']', '/', '\\', ' ', '.', '_', '-', '\'' },
+                    System.StringSplitOptions.RemoveEmptyEntries)
+                .Where(t => t.Length >= 2);
+            return string.Join(" ", tokens);
+        }
+
+        /// <summary>
+        /// Pages a search scope, collecting matches; when the scope reaches the
+        /// ceiling it subdivides into child folders to remain exhaustive.
+        /// </summary>
+        private async Task SearchScopeAsync(string query, string path, WildcardMatcher matcher,
+            bool includeNonZero, Dictionary<string, ConflictMatch> results, CancellationToken ct)
+        {
+            string? cursor = null;
+            int retrieved = 0;
+            while (true)
+            {
+                var page = await _service.SearchFilenamePageAsync(query, path, cursor, ct).ConfigureAwait(false);
+                retrieved += CollectMatches(page.Items, matcher, includeNonZero, results);
+                cursor = page.Cursor;
+
+                if (retrieved >= _searchResultCeiling)
+                {
+                    await SubdivideAsync(query, path, matcher, includeNonZero, results, ct).ConfigureAwait(false);
+                    return;
+                }
+                if (!page.HasMore) return;
+            }
+        }
+
+        /// <summary>Adds satisfying items to <paramref name="results"/>; returns how many were inspected.</summary>
+        private static int CollectMatches(IEnumerable<DropboxItem> items, WildcardMatcher matcher,
+            bool includeNonZero, Dictionary<string, ConflictMatch> results)
+        {
+            int count = 0;
+            foreach (var item in items)
+            {
+                count++;
+                if (Satisfies(item, matcher, includeNonZero))
+                    results[item.Path.ToLowerInvariant()] = new ConflictMatch { Path = item.Path, Bytes = item.Length };
+            }
+            return count;
+        }
+
+        /// <summary>Runs the search independently within each immediate child folder and unions the results.</summary>
+        private async Task SubdivideAsync(string query, string path, WildcardMatcher matcher,
+            bool includeNonZero, Dictionary<string, ConflictMatch> results, CancellationToken ct)
+        {
+            var children = await _service.ListFolderAsync(path, recursive: false, includeDeleted: false, ct)
+                .ConfigureAwait(false);
+            foreach (var child in children.Where(c => c.IsFolder))
+                await SearchScopeAsync(query, child.Path, matcher, includeNonZero, results, ct).ConfigureAwait(false);
         }
 
         private static bool CanReuse(ConflictScanState? state, ConflictScanParameters p, string startPath, string accountId) =>

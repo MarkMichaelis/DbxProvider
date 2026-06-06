@@ -19,8 +19,10 @@ public class FakeDropboxServiceClient : DropboxServiceClient
 {
     private readonly List<DropboxItem> _items;
     private readonly Queue<ListFolderDelta> _scriptedDeltas = new();
+    private readonly Dictionary<string, List<List<DropboxItem>>> _searchPages = new();
     private int _fullListCalls;
     private int _continueCalls;
+    private int _searchCalls;
     private string _fullCursor = "cursor-full-0";
 
     /// <summary>Records every <see cref="UploadAsync"/> call in order, capturing
@@ -48,6 +50,51 @@ public class FakeDropboxServiceClient : DropboxServiceClient
 
     /// <summary>Number of times the /list_folder/continue delta path was invoked.</summary>
     public int ContinueCalls => _continueCalls;
+
+    /// <summary>Number of times the search_v2 page path was invoked.</summary>
+    public int SearchCalls => _searchCalls;
+
+    /// <summary>
+    /// Appends a page of search results for the given scope (the search
+    /// <c>path</c>, normalized). Enqueue multiple pages for the same scope to
+    /// exercise cursor pagination; the fake links them with synthetic cursors.
+    /// </summary>
+    public void EnqueueSearchPage(string scope, IEnumerable<DropboxItem> items)
+    {
+        var norm = NormalizePath(scope);
+        if (!_searchPages.TryGetValue(norm, out var pages))
+            _searchPages[norm] = pages = new List<List<DropboxItem>>();
+        pages.Add(items.ToList());
+    }
+
+    public override Task<SearchPage> SearchFilenamePageAsync(
+        string query, string path, string? cursor = null, CancellationToken cancellationToken = default)
+    {
+        System.Threading.Interlocked.Increment(ref _searchCalls);
+        string scope;
+        int index;
+        if (string.IsNullOrEmpty(cursor))
+        {
+            scope = NormalizePath(path);
+            index = 0;
+        }
+        else
+        {
+            int sep = cursor.LastIndexOf('#');
+            scope = cursor.Substring(0, sep);
+            index = int.Parse(cursor.Substring(sep + 1));
+        }
+
+        var page = new SearchPage();
+        if (_searchPages.TryGetValue(scope, out var pages) && index < pages.Count)
+        {
+            page.Items.AddRange(pages[index]);
+            bool hasMore = index + 1 < pages.Count;
+            page.HasMore = hasMore;
+            page.Cursor = hasMore ? $"{scope}#{index + 1}" : string.Empty;
+        }
+        return Task.FromResult(page);
+    }
 
     /// <summary>Sets the cursor the next full recursive listing returns.</summary>
     public void SetFullCursor(string cursor) => _fullCursor = cursor;

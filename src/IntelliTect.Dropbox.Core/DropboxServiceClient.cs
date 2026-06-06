@@ -381,6 +381,56 @@ namespace IntelliTect.Dropbox
         }
 
         /// <summary>
+        /// A single page of filename-only search_v2 results plus the
+        /// continuation state needed to fetch the next page.
+        /// </summary>
+        public sealed class SearchPage
+        {
+            /// <summary>The file/folder metadata returned by this page.</summary>
+            public List<DropboxItem> Items { get; } = new();
+
+            /// <summary>Cursor to pass to the next <see cref="SearchFilenamePageAsync"/> call.</summary>
+            public string Cursor { get; set; } = string.Empty;
+
+            /// <summary>True when more pages remain for the same query.</summary>
+            public bool HasMore { get; set; }
+        }
+
+        /// <summary>
+        /// Fetches a single page of a <c>filenameOnly</c> search_v2 query scoped
+        /// to <paramref name="path"/>. When <paramref name="cursor"/> is non-empty
+        /// it continues a prior search (the <paramref name="query"/> and
+        /// <paramref name="path"/> are ignored); otherwise it starts a new search.
+        /// Unlike <see cref="SearchAsync"/>, this exposes the raw cursor so callers
+        /// can page exhaustively and react to the search_v2 result ceiling.
+        /// </summary>
+        public virtual Task<SearchPage> SearchFilenamePageAsync(string query, string path,
+            string? cursor = null, CancellationToken cancellationToken = default) =>
+            RetryAsync(_ => SearchFilenamePageCoreAsync(query, path, cursor), cancellationToken);
+
+        private async Task<SearchPage> SearchFilenamePageCoreAsync(string query, string path, string? cursor)
+        {
+            SearchV2Result result;
+            if (string.IsNullOrEmpty(cursor))
+            {
+                var options = new SearchOptions(
+                    path: string.IsNullOrEmpty(path) ? null : NormalizePath(path),
+                    filenameOnly: true);
+                result = await _client.Files.SearchV2Async(query, options);
+            }
+            else
+            {
+                result = await _client.Files.SearchContinueV2Async(cursor);
+            }
+
+            var page = new SearchPage { Cursor = result.Cursor, HasMore = result.HasMore };
+            foreach (var match in result.Matches)
+                if (match.Metadata?.AsMetadata?.Value is Metadata md)
+                    page.Items.Add(MapMetadataToItem(md));
+            return page;
+        }
+
+        /// <summary>
         /// Filename-only search using a PowerShell wildcard pattern. Dropbox's
         /// search_v2 is prefix-token-based (not glob), so we derive a token
         /// query from the pattern, then post-filter the results with
