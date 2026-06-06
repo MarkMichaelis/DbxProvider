@@ -106,7 +106,7 @@ Best for: rebuild &rarr; smoke-test loop in the **current** shell.
 
 ```powershell
 dotnet build src\DbxProvider\DbxProvider.csproj -c Debug
-Import-Module .\src\DbxProvider\bin\Debug\net8.0\DbxProvider.psd1 -Force
+Import-Module .\src\DbxProvider\bin\Debug\net10.0\DbxProvider.psd1 -Force
 ```
 
 Notes:
@@ -630,7 +630,7 @@ those up automatically:
 # 1. One-time: build the module and authenticate. This populates
 #    %LOCALAPPDATA%\DbxProvider\credentials.json (DPAPI-encrypted on Windows).
 dotnet build src\DbxProvider\DbxProvider.csproj -c Release
-Import-Module .\src\DbxProvider\bin\Release\net8.0\DbxProvider.dll
+Import-Module .\src\DbxProvider\bin\Release\net10.0\DbxProvider.dll
 Connect-Dropbox -AppKey <key> -AppSecret <secret>
 
 # 2. Build + run both test suites (same entry point CI uses).

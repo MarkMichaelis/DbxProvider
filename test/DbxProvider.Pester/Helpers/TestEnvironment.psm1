@@ -2,7 +2,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
-$script:ModuleDllPath = Join-Path $script:RepoRoot 'src\DbxProvider\bin\Release\net8.0\DbxProvider.dll'
+$script:ModuleDllPath = Join-Path $script:RepoRoot 'src\DbxProvider\bin\Release\net10.0\DbxProvider.dll'
 $script:FunctionalTestsCsproj = Join-Path $script:RepoRoot 'test\DbxProvider.FunctionalTests\DbxProvider.FunctionalTests.csproj'
 $script:CachedSecrets = $null
 

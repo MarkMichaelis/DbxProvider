@@ -40,7 +40,7 @@ $solution           = Join-Path $repoRoot 'DbxProvider.sln'
 $functionalCsproj   = Join-Path $repoRoot 'test\DbxProvider.FunctionalTests\DbxProvider.FunctionalTests.csproj'
 $pesterEntry        = Join-Path $repoRoot 'test\DbxProvider.Pester\Invoke-Tests.ps1'
 $resultsDir         = Join-Path $repoRoot 'TestResults'
-$moduleDll          = Join-Path $repoRoot 'src\DbxProvider\bin\Release\net8.0\DbxProvider.dll'
+$moduleDll          = Join-Path $repoRoot 'src\DbxProvider\bin\Release\net10.0\DbxProvider.dll'
 
 function Test-DropboxSecretsConfigured {
     foreach ($n in 'DBX_APP_KEY','DBX_APP_SECRET','DBX_REFRESH_TOKEN') {
@@ -65,7 +65,7 @@ function Test-DropboxSecretsConfigured {
 
     if (Test-Path $moduleDll) {
         # NOTE: do NOT Add-Type the module DLL here - that locks
-        # bin\Release\net8.0\DbxProvider.dll for the lifetime of this
+        # bin\Release\net10.0\DbxProvider.dll for the lifetime of this
         # pwsh process and breaks every subsequent `dotnet build`.
         # Run the credential probe in a child pwsh so the DLL is
         # released as soon as the child exits.
@@ -114,7 +114,7 @@ function Show-MissingSecretsHelp {
     Write-Host ''
     Write-Host '  [1] Easiest -- authenticate once with Connect-Dropbox:' -ForegroundColor Cyan
     Write-Host '        dotnet build src\DbxProvider\DbxProvider.csproj -c Release'
-    Write-Host '        Import-Module .\src\DbxProvider\bin\Release\net8.0\DbxProvider.dll'
+    Write-Host '        Import-Module .\src\DbxProvider\bin\Release\net10.0\DbxProvider.dll'
     Write-Host '        Connect-Dropbox -AppKey <key> -AppSecret <secret>'
     Write-Host '      (Saves to %LOCALAPPDATA%\DbxProvider\credentials.json, DPAPI-encrypted.)'
     Write-Host ''
@@ -203,7 +203,7 @@ try {
     if ($secretsCheck.Ok -and (Test-Path $moduleDll)) {
         try {
             # IMPORTANT: do NOT Add-Type the module DLL in this parent pwsh
-            # process - that locks bin\Release\net8.0\DbxProvider.dll for
+            # process - that locks bin\Release\net10.0\DbxProvider.dll for
             # the lifetime of the session and breaks every subsequent
             # `dotnet build` (MSB3027 "file is locked by PowerShell 7").
             # Instead, shell out to a child pwsh process for the one-shot
