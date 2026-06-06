@@ -118,6 +118,47 @@ namespace IntelliTect.Dropbox
             return (items, cursor);
         }
 
+        /// <summary>One page of a <c>list_folder</c> enumeration.</summary>
+        public sealed class ListFolderPage
+        {
+            /// <summary>Items returned by this single page.</summary>
+            public List<DropboxItem> Items { get; } = new();
+
+            /// <summary>Cursor describing the snapshot so far; pass to
+            /// <see cref="ListFolderContinueRawAsync"/> for the next page.</summary>
+            public string Cursor { get; set; } = string.Empty;
+
+            /// <summary>True when more pages remain.</summary>
+            public bool HasMore { get; set; }
+        }
+
+        /// <summary>
+        /// Issues a single (first) <c>list_folder</c> call and returns just that
+        /// page together with its cursor and a <see cref="ListFolderPage.HasMore"/>
+        /// flag. Unlike <see cref="ListFolderWithCursorAsync"/> this does not drain
+        /// every page, so callers can walk a large recursive listing one page at a
+        /// time and persist progress between pages. Optionally requests media info
+        /// and explicit-shared-member flags, which a recursive listing returns at
+        /// no extra round-trip cost.
+        /// </summary>
+        public virtual Task<ListFolderPage> ListFolderFirstPageAsync(string path, bool recursive = false,
+            bool includeDeleted = false, bool includeMediaInfo = false,
+            bool includeHasExplicitSharedMembers = false, CancellationToken cancellationToken = default) =>
+            RetryAsync(_ => ListFolderFirstPageCoreAsync(path, recursive, includeDeleted, includeMediaInfo,
+                includeHasExplicitSharedMembers), cancellationToken);
+
+        private async Task<ListFolderPage> ListFolderFirstPageCoreAsync(string path, bool recursive,
+            bool includeDeleted, bool includeMediaInfo, bool includeHasExplicitSharedMembers)
+        {
+            var dbxPath = NormalizePath(path);
+            var result = await _client.Files.ListFolderAsync(dbxPath, recursive,
+                includeMediaInfo: includeMediaInfo, includeDeleted: includeDeleted,
+                includeHasExplicitSharedMembers: includeHasExplicitSharedMembers, includeMountedFolders: true);
+            var page = new ListFolderPage { Cursor = result.Cursor, HasMore = result.HasMore };
+            page.Items.AddRange(result.Entries.Select(MapMetadataToItem));
+            return page;
+        }
+
         /// <summary>
         /// Result of a delta-fetch via /files/list_folder/continue.
         /// </summary>
@@ -466,7 +507,7 @@ namespace IntelliTect.Dropbox
 
         #region Files - Revisions
 
-        public Task<List<DropboxRevision>> ListRevisionsAsync(string path, int limit = 10, CancellationToken cancellationToken = default) =>
+        public virtual Task<List<DropboxRevision>> ListRevisionsAsync(string path, int limit = 10, CancellationToken cancellationToken = default) =>
             RetryAsync(_ => ListRevisionsCoreAsync(path, limit), cancellationToken);
 
         private async Task<List<DropboxRevision>> ListRevisionsCoreAsync(string path, int limit = 10)
@@ -965,6 +1006,7 @@ namespace IntelliTect.Dropbox
                 item.HasExplicitSharedMembers = file.HasExplicitSharedMembers ?? false;
                 item.IsDownloadable = file.IsDownloadable;
                 item.SymlinkTarget = file.SymlinkInfo?.Target ?? "";
+                item.MediaInfoTag = MapMediaInfoTag(file.MediaInfo);
             }
             else if (metadata.IsFolder && metadata.AsFolder is FolderMetadata folder)
             {
@@ -972,6 +1014,25 @@ namespace IntelliTect.Dropbox
                 item.SharedFolderId = folder.SharedFolderId ?? "";
             }
             return item;
+        }
+
+        /// <summary>
+        /// Reduces a Dropbox <see cref="MediaInfo"/> to a short tag:
+        /// <c>pending</c>, <c>photo</c>, <c>video</c>, <c>metadata</c>, or empty
+        /// when no media info is present.
+        /// </summary>
+        private static string MapMediaInfoTag(MediaInfo? mediaInfo)
+        {
+            if (mediaInfo == null) return "";
+            if (mediaInfo.IsPending) return "pending";
+            if (!mediaInfo.IsMetadata) return "";
+            var value = mediaInfo.AsMetadata?.Value;
+            return value switch
+            {
+                PhotoMetadata => "photo",
+                VideoMetadata => "video",
+                _ => "metadata"
+            };
         }
 
         private static DropboxSharedLink MapSharedLink(SharedLinkMetadata link) => new()

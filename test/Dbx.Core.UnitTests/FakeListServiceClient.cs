@@ -29,6 +29,37 @@ internal sealed class FakeListServiceClient : DropboxServiceClient
     /// <summary>Number of non-recursive <c>list_folder</c> calls made.</summary>
     public int NonRecursiveListCalls { get; private set; }
 
+    /// <summary>Number of first-page recursive listing calls made.</summary>
+    public int FirstPageCalls { get; private set; }
+
+    /// <summary>Number of <c>list_folder/continue</c> calls made.</summary>
+    public int ContinueCalls { get; private set; }
+
+    /// <summary>Cursors passed to each continue call, in order.</summary>
+    public List<string> ContinueCursors { get; } = new();
+
+    /// <summary>Maximum items returned per listing page. Defaults to one page.</summary>
+    public int PageSize { get; set; } = int.MaxValue;
+
+    /// <summary>When set, the continue call whose 1-based ordinal equals this
+    /// value throws <see cref="OperationCanceledException"/> to simulate an
+    /// interrupted build.</summary>
+    public int? ThrowOnContinueCall { get; set; }
+
+    /// <summary>Revisions returned per file path (normalized or raw).</summary>
+    public Dictionary<string, List<DropboxRevision>> RevisionsByPath { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>File paths passed to each <c>ListRevisionsAsync</c> call.</summary>
+    public List<string> RevisionPathsRequested { get; } = new();
+
+    /// <summary>Last value of <c>includeMediaInfo</c> seen by a first-page call.</summary>
+    public bool LastIncludeMediaInfo { get; private set; }
+
+    /// <summary>Last value of <c>includeHasExplicitSharedMembers</c> seen by a
+    /// first-page call.</summary>
+    public bool LastIncludeHasExplicitSharedMembers { get; private set; }
+
     private static string Parent(string normalizedPath)
     {
         int i = normalizedPath.LastIndexOf('/');
@@ -39,13 +70,24 @@ internal sealed class FakeListServiceClient : DropboxServiceClient
         root.Length == 0 ||
         itemPath.StartsWith(root + "/", StringComparison.OrdinalIgnoreCase);
 
+    private List<DropboxItem> Recursive(string norm) =>
+        _items.Where(i => IsDescendantOf(i.Path, norm)).ToList();
+
+    private static string MakeCursor(string root, int index) => $"cur::{root}::{index}";
+
+    private static (string Root, int Index) ParseCursor(string cursor)
+    {
+        var parts = cursor.Split(new[] { "::" }, StringSplitOptions.None);
+        return (parts[1], int.Parse(parts[2]));
+    }
+
     public override Task<List<DropboxItem>> ListFolderAsync(string path, bool recursive = false, bool includeDeleted = false, CancellationToken cancellationToken = default)
     {
         var norm = NormalizePath(path);
         if (recursive)
         {
             RecursiveListCalls++;
-            return Task.FromResult(_items.Where(i => IsDescendantOf(i.Path, norm)).ToList());
+            return Task.FromResult(Recursive(norm));
         }
 
         NonRecursiveListCalls++;
@@ -58,5 +100,45 @@ internal sealed class FakeListServiceClient : DropboxServiceClient
         NonRecursiveListCalls++;
         var children = _items.Where(i => Parent(i.Path) == norm).ToList();
         return Task.FromResult((children, $"cursor::{norm}"));
+    }
+
+    public override Task<ListFolderPage> ListFolderFirstPageAsync(string path, bool recursive = false,
+        bool includeDeleted = false, bool includeMediaInfo = false,
+        bool includeHasExplicitSharedMembers = false, CancellationToken cancellationToken = default)
+    {
+        FirstPageCalls++;
+        var norm = NormalizePath(path);
+        var all = Recursive(norm);
+        var take = Math.Min(PageSize, all.Count);
+        LastIncludeMediaInfo = includeMediaInfo;
+        LastIncludeHasExplicitSharedMembers = includeHasExplicitSharedMembers;
+        var page = new ListFolderPage { Cursor = MakeCursor(norm, take), HasMore = take < all.Count };
+        page.Items.AddRange(all.Take(take));
+        return Task.FromResult(page);
+    }
+
+    public override Task<ListFolderDelta> ListFolderContinueRawAsync(string cursor, CancellationToken cancellationToken = default)
+    {
+        ContinueCalls++;
+        ContinueCursors.Add(cursor);
+        if (ThrowOnContinueCall.HasValue && ContinueCalls == ThrowOnContinueCall.Value)
+            throw new OperationCanceledException();
+
+        var (root, index) = ParseCursor(cursor);
+        var all = Recursive(root);
+        var take = Math.Min(PageSize, all.Count - index);
+        var next = index + take;
+        var delta = new ListFolderDelta { NewCursor = MakeCursor(root, next), HasMore = next < all.Count };
+        delta.AddsOrUpdates.AddRange(all.Skip(index).Take(take));
+        return Task.FromResult(delta);
+    }
+
+    public override Task<List<DropboxRevision>> ListRevisionsAsync(string path, int limit = 10, CancellationToken cancellationToken = default)
+    {
+        RevisionPathsRequested.Add(path);
+        var norm = NormalizePath(path);
+        if (RevisionsByPath.TryGetValue(norm, out var revs)) return Task.FromResult(revs.ToList());
+        if (RevisionsByPath.TryGetValue(path, out var raw)) return Task.FromResult(raw.ToList());
+        return Task.FromResult(new List<DropboxRevision>());
     }
 }
