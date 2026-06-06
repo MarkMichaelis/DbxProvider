@@ -10,11 +10,11 @@ namespace DbxProvider.Cmdlets
 {
     /// <summary>
     /// Scans a Dropbox subtree for zero-byte (or, with -IncludeNonZero, all)
-    /// "conflicted copy" files. The first run does a full recursive
-    /// enumeration and persists the resulting cursor and match set to a JSON
-    /// sidecar file; later runs fetch only the delta since that cursor,
-    /// transparently falling back to a full pass when the cursor is rejected
-    /// or any scan parameter changes. Pass -Full to force a full pass.
+    /// "conflicted copy" files. A cold run uses the fast indexed search_v2
+    /// endpoint by default (like the Dropbox website). When a reusable saved
+    /// cursor exists, later runs fetch only the delta since that cursor. Pass
+    /// -Full to force an authoritative recursive enumeration that also
+    /// (re)establishes the incremental cursor.
     /// </summary>
     [Cmdlet(VerbsCommon.Find, "DropboxConflict")]
     [OutputType(typeof(ConflictMatch))]
@@ -56,16 +56,34 @@ namespace DbxProvider.Cmdlets
             var previousState = Full.IsPresent ? null : LoadState(statePath);
 
             var scanner = new ConflictScanner(service);
-            var result = Run(ct => scanner.ScanAsync(parameters, previousState, ct));
+            var (result, mode) = RunScan(scanner, parameters, previousState);
 
             SaveState(statePath, result.State);
 
-            WriteVerbose(result.WasFullScan
-                ? $"Full recursive scan complete: {result.Matches.Count} match(es). State saved to '{statePath}'."
-                : $"Incremental scan complete: {result.Matches.Count} match(es). State saved to '{statePath}'.");
+            WriteVerbose($"{mode} complete: {result.Matches.Count} match(es). State saved to '{statePath}'.");
 
             foreach (var match in result.Matches.OrderBy(m => m.Path, StringComparer.OrdinalIgnoreCase))
                 WriteObject(match);
+        }
+
+        /// <summary>
+        /// Routes to the right scan strategy: <c>-Full</c> forces an authoritative
+        /// recursive walk; a reusable saved cursor drives a warm incremental delta;
+        /// otherwise a cold run uses the fast search_v2 discovery path.
+        /// </summary>
+        private (ConflictScanResult Result, string Mode) RunScan(
+            ConflictScanner scanner, ConflictScanParameters parameters, ConflictScanState? previousState)
+        {
+            if (Full.IsPresent)
+                return (Run(ct => scanner.ScanAsync(parameters, null, ct)), "Full recursive scan");
+
+            if (previousState is not null && !string.IsNullOrEmpty(previousState.Cursor))
+            {
+                var warm = Run(ct => scanner.ScanAsync(parameters, previousState, ct));
+                return (warm, warm.WasFullScan ? "Full recursive scan" : "Incremental scan");
+            }
+
+            return (Run(ct => scanner.SearchScanAsync(parameters, ct)), "Search scan");
         }
 
         private static string StripDrivePrefix(string path)
