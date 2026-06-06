@@ -46,6 +46,42 @@ public class CachePathTests : IDisposable
     }
 
     [Fact]
+    public void Default_root_is_DbxProvider_directory_with_no_cache_subfolder()
+    {
+        // No RootDirectoryOverride: exercise the real default composition.
+        var options = new CacheOptions();
+
+        var expected = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "DbxProvider");
+
+        Assert.Equal(expected, options.EffectiveRootDirectory);
+        Assert.Equal(expected, CacheOptions.Default.EffectiveRootDirectory);
+        var segments = options.EffectiveRootDirectory.Split(
+            Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        Assert.DoesNotContain("cache", segments);
+    }
+
+    [Fact]
+    public void Default_database_path_lives_directly_under_DbxProvider_with_no_cache_segment()
+    {
+        // No RootDirectoryOverride: the resolved default DB path must drop the
+        // redundant "cache" segment and sit directly under DbxProvider.
+        var options = new CacheOptions { FlushIntervalSeconds = 0 };
+
+        var resolved = MetadataCache.GetDatabasePath(options, "User@Example.com", "acct-1");
+
+        var expected = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "DbxProvider",
+            "DropboxCache.user@example.com.db");
+        Assert.Equal(expected, resolved);
+        var segments = resolved.Split(
+            Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        Assert.DoesNotContain("cache", segments);
+    }
+
+    [Fact]
     public void Invalid_filename_character_in_email_is_sanitized_to_underscore()
     {
         var invalid = Path.GetInvalidFileNameChars().First(c => !char.IsControl(c) && c != '_');
