@@ -9,22 +9,29 @@ schema: 2.0.0
 
 ## SYNOPSIS
 
-Pre-populates the metadata cache for a subtree using a single recursive
-`/files/list_folder` call.
+Pre-populates the metadata cache for a subtree by walking a recursive
+`/files/list_folder` page by page (resumable), and can optionally cache each
+file's revision history.
 
 ## SYNTAX
 
 ```
-Build-DropboxCache [[-Path] <String>] [-DriveName <String>] [-ProgressAction <ActionPreference>]
- [<CommonParameters>]
+Build-DropboxCache [[-Path] <String>] [-IncludeRevisions] [-DriveName <String>]
+ [-ProgressAction <ActionPreference>] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
 ## DESCRIPTION
 
-Walks the Dropbox tree under `-Path` with one recursive `list_folder`, groups
-the flat result by parent folder, and stores each group as a per-folder cache
-entry. This is far cheaper than the lazy, one-`list_folder`-per-folder warming
-that happens on demand during `Get-ChildItem`.
+Walks the Dropbox tree under `-Path` with a recursive `list_folder`, reading the
+listing one page at a time. After every page the per-folder entries and an
+in-progress cursor are flushed to the cache database, so an interrupted build
+(Ctrl+C, network drop, or process exit) resumes from the last completed page on
+the next invocation instead of starting over. When Dropbox reports that a saved
+cursor is no longer valid, the build restarts cleanly from the first page.
+
+The recursive listing also requests media info and explicit-shared-member
+flags, which Dropbox returns at no extra request cost, so the cached entries are
+enriched with that metadata as a side effect of the build.
 
 Because a recursive listing returns only a single subtree cursor (not a cursor
 per folder), the entries created by this command start without a per-folder
@@ -34,14 +41,17 @@ for that folder), after which it behaves like any other cursor-validated entry.
 Dropbox always remains the master: a built entry is never served without first
 reconciling against the server.
 
+With `-IncludeRevisions`, the command runs a second pass that fetches and caches
+the revision history of every file in the subtree. Files whose revisions were
+fetched recently are skipped, so this pass is also resumable and cheap to
+repeat. Progress is reported via `Write-Progress`.
+
 If the cache is disabled (`Set-DropboxCacheOption -Disable`), the command warns
 and does nothing.
 
-The command emits a summary object reporting the number of folders cached and
-the total number of items found.
-
-This command populates folder/metadata listings only. Fetching file revision
-history is a separate feature and is not performed here.
+The command supports `-WhatIf`/`-Confirm` and emits a summary object reporting
+the number of folders cached, items found, and (when `-IncludeRevisions` is
+used) files and revisions cached.
 
 ## EXAMPLES
 
@@ -59,6 +69,21 @@ PS> Build-DropboxCache -Path '/Projects'
 
 Pre-populates the cache for everything under `/Projects`.
 
+### Example 3
+```powershell
+PS> Build-DropboxCache -Path '/Projects' -IncludeRevisions
+```
+
+Pre-populates the cache under `/Projects` and also caches every file's revision
+history.
+
+### Example 4
+```powershell
+PS> Build-DropboxCache -WhatIf
+```
+
+Shows what the command would build without modifying the cache.
+
 ## PARAMETERS
 
 ### -DriveName
@@ -73,6 +98,24 @@ Aliases:
 Required: False
 Position: Named
 Default value: Dbx
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -IncludeRevisions
+
+After building folder metadata, run a second pass that fetches and caches each
+file's revision history. Files fetched recently are skipped so the pass is
+resumable.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
 Accept pipeline input: False
 Accept wildcard characters: False
 ```
@@ -109,6 +152,38 @@ Accept pipeline input: False
 Accept wildcard characters: False
 ```
 
+### -Confirm
+
+Prompts you for confirmation before running the command.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: cf
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -WhatIf
+
+Shows what would happen if the command runs. The command is not run.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: wi
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
 ### CommonParameters
 
 This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable,
@@ -124,7 +199,8 @@ This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable
 
 ### System.Management.Automation.PSObject
 
-A summary with `DriveName`, `Path`, `FoldersCached`, and `ItemsFound`.
+A summary with `DriveName`, `Path`, `FoldersCached`, `ItemsFound`,
+`FilesWithRevisionsCached`, and `RevisionsCached`.
 
 ## NOTES
 
