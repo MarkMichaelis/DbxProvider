@@ -140,4 +140,90 @@ namespace DbxProvider.Cmdlets
             WriteObject(new PSObject(cache.Options));
         }
     }
+
+    /// <summary>
+    /// Adds or updates a per-email override that pins an account's metadata
+    /// cache database to an explicit file path, then persists it so the setting
+    /// survives across sessions.
+    /// </summary>
+    [Cmdlet(VerbsCommon.Set, "DropboxCacheDatabasePath")]
+    [OutputType(typeof(PSObject))]
+    public class SetDropboxCacheDatabasePathCommand : PSCmdlet
+    {
+        [Parameter(Mandatory = true, Position = 0)]
+        public string Email { get; set; } = string.Empty;
+
+        [Parameter(Mandatory = true, Position = 1)]
+        public string Path { get; set; } = string.Empty;
+
+        [Parameter]
+        public string DriveName { get; set; } = "Dbx";
+
+        protected override void ProcessRecord()
+        {
+            CacheOptions.Default.EmailDatabasePathOverrides[Email] = Path;
+            CacheConfigStore.Default.SaveOverrides(CacheOptions.Default.EmailDatabasePathOverrides);
+
+            var resolved = MetadataCache.GetDatabasePath(CacheOptions.Default, Email, accountId: "");
+
+            var liveDrive = SessionState.Drive.GetAllForProvider("Dropbox")
+                .OfType<DropboxDriveInfo>()
+                .FirstOrDefault(d => d.Cache != null &&
+                    string.Equals(d.Cache.Email, Email, StringComparison.OrdinalIgnoreCase));
+            if (liveDrive != null)
+            {
+                WriteWarning(
+                    $"Reconnect drive '{liveDrive.Name}:' (Disconnect-Dropbox then Connect-Dropbox) " +
+                    "for the new cache database path to take effect; an open cache database is never moved.");
+            }
+
+            var result = new PSObject();
+            result.Properties.Add(new PSNoteProperty("Email", Email));
+            result.Properties.Add(new PSNoteProperty("ConfiguredPath", Path));
+            result.Properties.Add(new PSNoteProperty("ResolvedPath", resolved));
+            WriteObject(result);
+        }
+    }
+
+    /// <summary>
+    /// Removes a per-email cache database path override and persists the change.
+    /// </summary>
+    [Cmdlet(VerbsCommon.Remove, "DropboxCacheDatabasePath")]
+    public class RemoveDropboxCacheDatabasePathCommand : PSCmdlet
+    {
+        [Parameter(Mandatory = true, Position = 0)]
+        public string Email { get; set; } = string.Empty;
+
+        protected override void ProcessRecord()
+        {
+            var removed = CacheOptions.Default.EmailDatabasePathOverrides.Remove(Email);
+            CacheConfigStore.Default.SaveOverrides(CacheOptions.Default.EmailDatabasePathOverrides);
+            WriteVerbose(removed
+                ? $"Removed cache database path override for '{Email}'."
+                : $"No cache database path override existed for '{Email}'.");
+        }
+    }
+
+    /// <summary>
+    /// Lists the configured per-email cache database path overrides together
+    /// with the absolute path each one resolves to.
+    /// </summary>
+    [Cmdlet(VerbsCommon.Get, "DropboxCacheDatabasePath")]
+    [OutputType(typeof(PSObject))]
+    public class GetDropboxCacheDatabasePathCommand : PSCmdlet
+    {
+        protected override void ProcessRecord()
+        {
+            foreach (var pair in CacheOptions.Default.EmailDatabasePathOverrides
+                .OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                var row = new PSObject();
+                row.Properties.Add(new PSNoteProperty("Email", pair.Key));
+                row.Properties.Add(new PSNoteProperty("ConfiguredPath", pair.Value));
+                row.Properties.Add(new PSNoteProperty("ResolvedPath",
+                    MetadataCache.GetDatabasePath(CacheOptions.Default, pair.Key, accountId: "")));
+                WriteObject(row);
+            }
+        }
+    }
 }

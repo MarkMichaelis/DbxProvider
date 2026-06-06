@@ -23,6 +23,9 @@
         'Clear-DropboxCache',
         'Update-DropboxCache',
         'Set-DropboxCacheOption',
+        'Set-DropboxCacheDatabasePath',
+        'Remove-DropboxCacheDatabasePath',
+        'Get-DropboxCacheDatabasePath',
         # Search
         'Search-Dropbox',        # Revisions
         # Conflict scan
