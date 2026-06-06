@@ -100,8 +100,6 @@ namespace DbxProvider.Cmdlets
             Run(ct => cache.UpdateAsync(Path, cancellationToken: ct));
         }
     }
-
-    /// <summary>Toggles cache options at runtime.</summary>
     [Cmdlet(VerbsCommon.Set, "DropboxCacheOption")]
     public class SetDropboxCacheOptionCommand : PSCmdlet
     {

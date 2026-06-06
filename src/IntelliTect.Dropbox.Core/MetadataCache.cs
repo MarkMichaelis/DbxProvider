@@ -238,6 +238,97 @@ namespace IntelliTect.Dropbox
             return entry.Items.ToList();
         }
 
+        /// <summary>Outcome of a <see cref="BuildAsync"/> pre-population pass.</summary>
+        public sealed class BuildResult
+        {
+            /// <summary>Number of per-folder cache entries created or refreshed.</summary>
+            public int FoldersCached { get; set; }
+
+            /// <summary>Total number of descendant items returned by the
+            /// recursive listing.</summary>
+            public int ItemsFound { get; set; }
+        }
+
+        /// <summary>
+        /// Pre-populates the cache for an entire subtree using a single
+        /// recursive <c>list_folder</c>. The flat result is grouped by parent
+        /// folder and each group is stored as a per-folder entry. Because a
+        /// recursive listing yields only one subtree cursor (not per-folder
+        /// cursors), the created entries start with an empty cursor; each
+        /// acquires a real per-folder cursor on its first validated read.
+        /// </summary>
+        public async Task<BuildResult> BuildAsync(string path, CancellationToken cancellationToken = default)
+        {
+            if (!_options.Enabled) return new BuildResult();
+
+            var rootPath = DropboxServiceClient.NormalizePath(path);
+            var items = await _service.ListFolderAsync(rootPath, recursive: true,
+                cancellationToken: cancellationToken);
+
+            var childrenByFolder = GroupByParentFolder(items, rootPath);
+            var now = DateTime.UtcNow;
+            foreach (var pair in childrenByFolder)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                StoreBuiltEntry(pair.Key, pair.Value, now);
+            }
+
+            Flush();
+            EvictIfOverBudget();
+            return new BuildResult
+            {
+                FoldersCached = childrenByFolder.Count,
+                ItemsFound = items.Count
+            };
+        }
+
+        /// <summary>
+        /// Groups a flat recursive listing into per-folder child lists. Every
+        /// folder in the subtree (the root plus each discovered folder item)
+        /// gets a list, so empty folders are warmed too. Keys are display paths.
+        /// </summary>
+        private static Dictionary<string, List<DropboxItem>> GroupByParentFolder(
+            IEnumerable<DropboxItem> items, string rootPath)
+        {
+            var byFolder = new Dictionary<string, List<DropboxItem>>(StringComparer.OrdinalIgnoreCase)
+            {
+                [rootPath] = new List<DropboxItem>()
+            };
+
+            foreach (var item in items)
+            {
+                if (item.IsFolder && !byFolder.ContainsKey(item.Path))
+                    byFolder[item.Path] = new List<DropboxItem>();
+
+                var parent = ParentOf(item.Path) ?? rootPath;
+                if (!byFolder.TryGetValue(parent, out var list))
+                {
+                    list = new List<DropboxItem>();
+                    byFolder[parent] = list;
+                }
+                list.Add(item);
+            }
+
+            return byFolder;
+        }
+
+        /// <summary>Stores a recursively-built folder entry with an empty cursor
+        /// so it acquires a real per-folder cursor on its first validated read.</summary>
+        private void StoreBuiltEntry(string folderPath, List<DropboxItem> children, DateTime timestamp)
+        {
+            var entry = new Entry
+            {
+                Path = folderPath,
+                PathLower = MakeKey(folderPath),
+                Cursor = "",
+                Items = children,
+                LastValidatedUtc = timestamp,
+                LastUsedUtc = timestamp,
+                Dirty = true
+            };
+            _entries[entry.PathLower] = entry;
+        }
+
         /// <summary>Returns the cached entry for <paramref name="path"/> without
         /// validating, hydrating it from the database if necessary.</summary>
         public bool TryGet(string path, out Entry? entry)
@@ -338,16 +429,20 @@ namespace IntelliTect.Dropbox
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (string.IsNullOrEmpty(entry.Cursor)) break;
+
+                // A recursively-built entry has no per-folder cursor yet; acquire
+                // one via a fresh listing so Dropbox stays the master before the
+                // entry is served.
+                if (string.IsNullOrEmpty(entry.Cursor))
+                {
+                    await RefreshFromServerAsync(entry, cancellationToken);
+                    break;
+                }
 
                 var delta = await _service.ListFolderContinueRawAsync(entry.Cursor, cancellationToken);
                 if (delta.ResetRequired)
                 {
-                    var (items, newCursor) = await _service.ListFolderWithCursorAsync(entry.Path, cancellationToken: cancellationToken);
-                    entry.Items = items.ToList();
-                    entry.Cursor = newCursor;
-                    entry.LastValidatedUtc = DateTime.UtcNow;
-                    entry.Dirty = true;
+                    await RefreshFromServerAsync(entry, cancellationToken);
                     break;
                 }
 
@@ -361,6 +456,18 @@ namespace IntelliTect.Dropbox
 
                 if (!delta.HasMore) break;
             }
+        }
+
+        /// <summary>Replaces an entry's items and cursor from a fresh
+        /// non-recursive listing of its path.</summary>
+        private async Task RefreshFromServerAsync(Entry entry, CancellationToken cancellationToken)
+        {
+            var (items, newCursor) = await _service.ListFolderWithCursorAsync(
+                entry.Path, cancellationToken: cancellationToken);
+            entry.Items = items.ToList();
+            entry.Cursor = newCursor;
+            entry.LastValidatedUtc = DateTime.UtcNow;
+            entry.Dirty = true;
         }
 
         private static void ApplyAddTo(Entry entry, DropboxItem item)

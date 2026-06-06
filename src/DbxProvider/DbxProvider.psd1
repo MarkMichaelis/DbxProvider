@@ -22,6 +22,7 @@
         'Get-DropboxCacheInfo',
         'Clear-DropboxCache',
         'Update-DropboxCache',
+        'Build-DropboxCache',
         'Set-DropboxCacheOption',
         'Set-DropboxCacheDatabasePath',
         'Remove-DropboxCacheDatabasePath',
