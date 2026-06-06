@@ -29,6 +29,8 @@ namespace IntelliTect.Dropbox
     /// <c>DropboxCache.&lt;email&gt;.db</c> using the account's email (sanitized for
     /// the file system); when no email is available a SHA-256 hash of the
     /// account id is used instead (<c>DropboxCache.&lt;accountIdHash&gt;.db</c>).
+    /// A per-email entry in <see cref="CacheOptions.EmailDatabasePathOverrides"/>
+    /// can redirect a specific account's database to an explicit file path.
     /// The persistent store is <b>unbounded</b> — nothing is ever evicted from
     /// disk. Entries are hydrated lazily (per path, on demand) so startup never
     /// pays to read the whole store. A bounded in-memory working set keeps the
