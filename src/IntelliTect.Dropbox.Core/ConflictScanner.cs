@@ -113,10 +113,20 @@ namespace IntelliTect.Dropbox
         /// incremental delta fetch when it is compatible, otherwise doing a full
         /// recursive pass.
         /// </summary>
+        /// <param name="parameters">Scan inputs (start path, pattern, size filter).</param>
+        /// <param name="previousState">Saved state from a prior run, or null for a cold full scan.</param>
+        /// <param name="cancellationToken">Token to cancel the scan.</param>
+        /// <param name="onProgress">
+        /// Optional callback invoked after every page is applied (both during a
+        /// full enumeration and a delta catch-up), receiving the in-progress
+        /// state. Callers can persist it so an interrupted scan resumes from the
+        /// last saved cursor instead of restarting from scratch.
+        /// </param>
         public async Task<ConflictScanResult> ScanAsync(
             ConflictScanParameters parameters,
             ConflictScanState? previousState,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            System.Action<ConflictScanState>? onProgress = null)
         {
             if (parameters is null) throw new System.ArgumentNullException(nameof(parameters));
 
@@ -125,9 +135,9 @@ namespace IntelliTect.Dropbox
             var matcher = new WildcardMatcher(parameters.Pattern);
 
             if (!CanReuse(previousState, parameters, startPath, account.AccountId))
-                return await FullScanAsync(parameters, startPath, account.AccountId, matcher, cancellationToken).ConfigureAwait(false);
+                return await FullScanAsync(parameters, startPath, account.AccountId, matcher, onProgress, cancellationToken).ConfigureAwait(false);
 
-            return await IncrementalScanAsync(parameters, startPath, account.AccountId, matcher, previousState!, cancellationToken)
+            return await IncrementalScanAsync(parameters, startPath, account.AccountId, matcher, previousState!, onProgress, cancellationToken)
                 .ConfigureAwait(false);
         }
 
@@ -139,24 +149,43 @@ namespace IntelliTect.Dropbox
             && state.Pattern == p.Pattern
             && state.IncludeNonZero == p.IncludeNonZero;
         private async Task<ConflictScanResult> FullScanAsync(
-            ConflictScanParameters p, string startPath, string accountId, WildcardMatcher matcher, CancellationToken ct)
+            ConflictScanParameters p, string startPath, string accountId, WildcardMatcher matcher,
+            System.Action<ConflictScanState>? onProgress, CancellationToken ct)
         {
-            var (items, cursor) = await _service
-                .ListFolderWithCursorAsync(startPath, recursive: true, includeDeleted: false, ct)
-                .ConfigureAwait(false);
-
+            // Stream the recursive listing one page at a time, retaining only the
+            // matches (and the cursor) -- never the whole tree. On a large account
+            // a single buffered enumeration would materialize millions of items
+            // and exhaust memory. Paging also lets the caller persist the cursor
+            // between pages so an interrupted full scan resumes via list_folder/
+            // continue instead of restarting.
             var state = new ConflictScanState
             {
                 AccountId = accountId,
                 StartPath = startPath,
                 Pattern = p.Pattern,
                 IncludeNonZero = p.IncludeNonZero,
-                Cursor = cursor,
             };
 
-            foreach (var item in items)
-            {
+            var page = await _service
+                .ListFolderFirstPageAsync(startPath, recursive: true, includeDeleted: false, cancellationToken: ct)
+                .ConfigureAwait(false);
+
+            foreach (var item in page.Items)
                 Upsert(state, item, matcher, p.IncludeNonZero);
+            state.Cursor = page.Cursor;
+            onProgress?.Invoke(state);
+
+            var hasMore = page.HasMore;
+            while (hasMore)
+            {
+                var delta = await _service.ListFolderContinueRawAsync(state.Cursor, ct).ConfigureAwait(false);
+                if (delta.ResetRequired)
+                    return await FullScanAsync(p, startPath, accountId, matcher, onProgress, ct).ConfigureAwait(false);
+
+                ApplyDelta(delta, state, matcher, p.IncludeNonZero);
+                state.Cursor = delta.NewCursor;
+                hasMore = delta.HasMore;
+                onProgress?.Invoke(state);
             }
 
             return new ConflictScanResult(state.Matches.Values.ToList(), state, wasFullScan: true);
@@ -164,7 +193,7 @@ namespace IntelliTect.Dropbox
 
         private async Task<ConflictScanResult> IncrementalScanAsync(
             ConflictScanParameters p, string startPath, string accountId, WildcardMatcher matcher,
-            ConflictScanState previousState, CancellationToken ct)
+            ConflictScanState previousState, System.Action<ConflictScanState>? onProgress, CancellationToken ct)
         {
             var state = CloneForUpdate(previousState, accountId, startPath, p);
             var cursor = state.Cursor;
@@ -173,11 +202,12 @@ namespace IntelliTect.Dropbox
             {
                 var delta = await _service.ListFolderContinueRawAsync(cursor, ct).ConfigureAwait(false);
                 if (delta.ResetRequired)
-                    return await FullScanAsync(p, startPath, accountId, matcher, ct).ConfigureAwait(false);
+                    return await FullScanAsync(p, startPath, accountId, matcher, onProgress, ct).ConfigureAwait(false);
 
                 ApplyDelta(delta, state, matcher, p.IncludeNonZero);
                 cursor = delta.NewCursor;
                 state.Cursor = cursor;
+                onProgress?.Invoke(state);
                 if (!delta.HasMore) break;
             }
 

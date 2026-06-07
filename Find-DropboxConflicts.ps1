@@ -5,13 +5,18 @@
     "...'s conflicted copy..." files and write them to a CSV manifest.
 
 .DESCRIPTION
-    Performs a breadth-first walk of the Dropbox tree, listing each folder
-    non-recursively so progress is visible immediately (the provider's native
-    -Recurse buffers the whole tree before emitting anything).
+    By default this runs the provider's cursor-pruned Find-DropboxConflict
+    cmdlet: the first run does a single server-side recursive enumeration
+    (streamed page-by-page, so memory stays bounded even on huge accounts) and
+    saves a cursor next to the manifest; later runs fetch only the delta since
+    that cursor, so repeat scans are far cheaper than re-walking the tree. New
+    matches are MERGED (append + de-dupe) into the manifest, never overwriting it.
 
-    Every match is flushed to the CSV the instant it is found, so a Ctrl+C
-    (e.g. during a Dropbox rate-limit back-off) or a hard crash never loses
-    results. A folder that fails to list is logged and the scan continues.
+    Pass -BfsWalk to use the legacy breadth-first walk instead: it lists each
+    folder non-recursively (one round-trip per folder), flushing every match to
+    the CSV the instant it is found, and supports -Resume of throttled folders.
+    It is slower but streams continuously and is resilient to mid-scan
+    interruption without relying on a saved cursor.
 
     The script only READS by default. To delete, re-run with -Delete (which
     supports -WhatIf / -Confirm) or pipe the manifest into Remove-DropboxItemBatch
@@ -33,16 +38,19 @@
     zero-byte conflict files are captured.
 
 .PARAMETER Incremental
-    Use the provider's cursor-pruned Find-DropboxConflict cmdlet instead of the
-    breadth-first walk. The first run does one full recursive enumeration and
-    saves an account cursor; subsequent runs fetch only the delta (adds /
-    updates / removes) since that cursor, so repeat scans are far cheaper. The
-    same CSV manifest is written. Falls back to a full pass automatically when
-    the cursor expires or any scan parameter changes.
+    Deprecated / no-op. The cursor-pruned scan is now the DEFAULT, so this switch
+    is accepted only for backward compatibility. Use -BfsWalk to opt into the
+    legacy breadth-first walk.
+
+.PARAMETER BfsWalk
+    Use the legacy breadth-first walk (one non-recursive list_folder call per
+    folder) instead of the default cursor-pruned recursive scan. Slower, but
+    streams every match to the CSV as it is found and supports -Resume of folders
+    that failed to list (e.g. throttling). Implied by -Resume / -RetryFailedLog.
 
 .PARAMETER Full
-    With -Incremental, ignore any saved state and force a full recursive pass
-    (which then saves fresh state for the next incremental run).
+    Ignore any saved incremental state and force a full recursive pass (which
+    then saves fresh state for the next incremental run). Default mode only.
 
 .PARAMETER ModulePath
     Path to the DbxProvider module manifest/DLL to import. Defaults to the
@@ -54,7 +62,8 @@
 
 .EXAMPLE
     ./Find-DropboxConflicts.ps1
-    Full scan from the drive root; writes the manifest to the Desktop.
+    Default cursor-pruned scan from the drive root; merges matches into the
+    manifest on the Desktop and saves a cursor for cheap re-runs.
 
 .EXAMPLE
     ./Find-DropboxConflicts.ps1 -StartPath 'Dbx:\IntelliTect.Old(2026-03-01)'
@@ -70,17 +79,20 @@
     Delete from a previously-saved manifest without re-scanning (preview).
 
 .EXAMPLE
-    ./Find-DropboxConflicts.ps1 -Resume
-    Finish an interrupted/partial run: keep the SAME manifest, re-scan only the
-    folders recorded in its *.failed-folders.txt (descending into them to
-    recover missed matches), and append de-duplicated rows. Repeats until a
+    ./Find-DropboxConflicts.ps1 -BfsWalk -Resume
+    Finish an interrupted breadth-first walk: keep the SAME manifest, re-scan
+    only the folders recorded in its *.failed-folders.txt (descending into them
+    to recover missed matches), and append de-duplicated rows. Repeats until a
     pass completes with zero failures.
 
 .NOTES
-    A normal run already self-repeats: after the initial walk it automatically
-    re-scans any folders that failed (Dropbox throttling, transient errors),
-    pausing between passes, until a pass finishes with no failures or only
-    permanent errors remain. Everything lands in one de-duplicated manifest.
+    The default scan saves its cursor and current match set next to the manifest
+    (*.state.json) periodically, so an interrupted run resumes from where it left
+    off on the next invocation instead of restarting. A -BfsWalk run instead
+    self-repeats: after the initial walk it automatically re-scans any folders
+    that failed (Dropbox throttling, transient errors), pausing between passes,
+    until a pass finishes with no failures or only permanent errors remain.
+    Either way, everything lands in one de-duplicated manifest.
 #>
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
@@ -110,10 +122,17 @@ param(
     # Fast path: use the provider's cursor-pruned Find-DropboxConflict cmdlet.
     # The cold run does one full recursive enumeration and saves a cursor; later
     # runs fetch only the delta since that cursor instead of re-walking the tree.
+    # This is now the DEFAULT, so -Incremental is accepted but no longer needed.
     [switch]$Incremental,
 
-    # With -Incremental, ignore saved state and force a full recursive pass
-    # (which then saves fresh state for the next incremental run).
+    # Opt into the legacy breadth-first walk (one list_folder call per folder).
+    # Slower (a round-trip per folder) but streams every match to the CSV as it
+    # is found and supports -Resume of throttled folders. The default is the
+    # cursor-pruned recursive scan via Find-DropboxConflict.
+    [switch]$BfsWalk,
+
+    # Ignore any saved incremental state and force a full recursive pass (which
+    # then saves fresh state for the next incremental run). Default mode only.
     [switch]$Full,
 
     [switch]$Delete
@@ -123,6 +142,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 if ($RetryFailedLog) { $Resume = $true }
+# -Resume / -RetryFailedLog are breadth-first-walk concepts (they re-scan the
+# folders recorded in a failed-folders log), so they imply -BfsWalk.
+if ($Resume) { $BfsWalk = $true }
 if ($MaxPasses -lt 1) { $MaxPasses = 1 }
 
 # --- Ensure the module is loaded and a Dropbox drive is mounted ------------
@@ -142,27 +164,51 @@ if (-not (Get-PSDrive -Name $driveName -ErrorAction SilentlyContinue)) {
 $failLog = [System.IO.Path]::ChangeExtension($OutputCsv, '.failed-folders.txt')
 $failDetail = [System.IO.Path]::ChangeExtension($OutputCsv, '.failed-detail.tsv')
 
-if ($Incremental) {
-    # --- Fast path: cursor-pruned scan via the provider cmdlet --------------
-    # The first run is a full recursive enumeration that saves a cursor; later
-    # runs fetch only the delta. Matches are emitted as objects with Bytes/Path,
-    # which we write to the same CSV manifest the full walk produces.
+if (-not $BfsWalk) {
+    # --- Default: cursor-pruned scan via the provider cmdlet ----------------
+    # The first run is a full recursive enumeration that streams page-by-page
+    # (bounded memory) and saves a cursor next to the manifest; later runs fetch
+    # only the delta. Matches are emitted as objects with Bytes/Path. New rows
+    # are MERGED into the existing manifest (append + de-dupe) so an existing
+    # walk's results are never clobbered.
+    if ($Incremental) {
+        Write-Verbose 'The cursor-pruned scan is now the default; -Incremental is redundant.'
+    }
+
+    # State lives next to the manifest so it is discoverable and travels with the
+    # CSV, and a re-run naturally resumes from the saved cursor.
+    $statePath = [System.IO.Path]::ChangeExtension($OutputCsv, '.state.json')
+
     Write-Host 'Incremental scan via Find-DropboxConflict...' -ForegroundColor Cyan
     $swInc = [System.Diagnostics.Stopwatch]::StartNew()
     $conflicts = @(Find-DropboxConflict -Path $StartPath -Pattern $Pattern -DriveName $driveName `
-            -IncludeNonZero:$IncludeNonZero -Full:$Full)
+            -IncludeNonZero:$IncludeNonZero -Full:$Full -StatePath $statePath)
 
-    $writer = [System.IO.StreamWriter]::new($OutputCsv, $false, [System.Text.UTF8Encoding]::new($false))
+    # Merge (append + de-dupe) into the existing manifest instead of overwriting
+    # it, so results from a prior walk / NAS seed are preserved.
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if (Test-Path -LiteralPath $OutputCsv) {
+        foreach ($row in Import-Csv -LiteralPath $OutputCsv) { [void]$seen.Add($row.Path) }
+        Write-Host "Loaded $($seen.Count) existing match(es) from $OutputCsv for de-dupe." -ForegroundColor Cyan
+    }
+
+    $append = Test-Path -LiteralPath $OutputCsv
+    $writer = [System.IO.StreamWriter]::new($OutputCsv, $append, [System.Text.UTF8Encoding]::new($false))
+    if (-not $append) { $writer.WriteLine('Bytes,Path') }
+    $added = 0
     try {
-        $writer.WriteLine('Bytes,Path')
         foreach ($m in $conflicts) {
-            $writer.WriteLine(('{0},"{1}"' -f $m.Bytes, ($m.Path -replace '"', '""')))
+            if ($seen.Add($m.Path)) {
+                $added++
+                $writer.WriteLine(('{0},"{1}"' -f $m.Bytes, ($m.Path -replace '"', '""')))
+            }
         }
     }
     finally { $writer.Flush(); $writer.Dispose() }
 
-    Write-Host ("Incremental scan complete in {0}s. matched={1}. Manifest: {2}" -f `
-            [int]$swInc.Elapsed.TotalSeconds, $conflicts.Count, $OutputCsv) -ForegroundColor Green
+    Write-Host ("Incremental scan complete in {0}s. matched={1} (added {2} new). Manifest: {3}" -f `
+            [int]$swInc.Elapsed.TotalSeconds, $conflicts.Count, $added, $OutputCsv) -ForegroundColor Green
+    Write-Host "Scan state (for the next delta run): $statePath" -ForegroundColor Gray
 }
 else {
 # --- Determine seeds + resume/dedupe state ---------------------------------

@@ -56,7 +56,18 @@ namespace DbxProvider.Cmdlets
             var previousState = Full.IsPresent ? null : LoadState(statePath);
 
             var scanner = new ConflictScanner(service);
-            var result = Run(ct => scanner.ScanAsync(parameters, previousState, ct));
+
+            // Persist progress periodically during a long full enumeration so an
+            // interruption (crash/Ctrl+C/network drop) resumes from the saved
+            // cursor on the next run instead of restarting the whole scan.
+            var sinceSave = System.Diagnostics.Stopwatch.StartNew();
+            var saveInterval = TimeSpan.FromSeconds(15);
+            var result = Run(ct => scanner.ScanAsync(parameters, previousState, ct, progressState =>
+            {
+                if (sinceSave.Elapsed < saveInterval) return;
+                SaveState(statePath, progressState);
+                sinceSave.Restart();
+            }));
 
             SaveState(statePath, result.State);
 

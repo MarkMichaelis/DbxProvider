@@ -20,12 +20,12 @@ namespace Dbx.Auth.UnitTests;
 public class DefaultBrowserTests
 {
     [Theory]
-    [InlineData("MSEdgeHTM",   "Microsoft Edge")]
-    [InlineData("ChromeHTML",  "Google Chrome")]
-    [InlineData("BraveHTML",   "Brave")]
-    [InlineData("VivaldiHTM",  "Vivaldi")]
+    [InlineData("MSEdgeHTM", "Microsoft Edge")]
+    [InlineData("ChromeHTML", "Google Chrome")]
+    [InlineData("BraveHTML", "Brave")]
+    [InlineData("VivaldiHTM", "Vivaldi")]
     [InlineData("OperaStable", "Opera")]
-    [InlineData("ArcHTM",      "Arc")]
+    [InlineData("ArcHTM", "Arc")]
     public void Map_RecognisesChromiumFamilyProgIds(string progId, string expectedName)
     {
         var raw = "\"C:\\Program Files\\Browser\\browser.exe\" --single-argument %1";

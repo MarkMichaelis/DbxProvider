@@ -48,6 +48,17 @@ namespace DbxProvider.Provider
                         return null!;
                     }
                     driveInfo = new DropboxDriveInfo(drive, dynParams.AccessToken);
+                    if (!dynParams.NoLocalMirror.IsPresent)
+                    {
+                        string? mirrorRoot = !string.IsNullOrEmpty(dynParams.LocalMirrorRoot)
+                            ? dynParams.LocalMirrorRoot
+                            : DropboxMirrorLocator.FindLocalRoot();
+                        if (!string.IsNullOrEmpty(mirrorRoot) && Directory.Exists(mirrorRoot))
+                        {
+                            driveInfo.Service.Mirror = new LocalMirrorResolver(
+                                new LocalMirrorOptions { Root = mirrorRoot });
+                        }
+                    }
                 }
 
                 Run(ct => driveInfo.Service.GetCurrentAccountAsync(cancellationToken: ct));
