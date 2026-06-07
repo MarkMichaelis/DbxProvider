@@ -22,6 +22,25 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Install PowerShell 7.6 (.NET 10 host)
+        # The runner's preinstalled pwsh runs on .NET 8 and cannot load this
+        # net10.0 binary module (FileNotFoundException for System.Runtime
+        # 10.0.0.0), which breaks help generation and the Pester suite. Install
+        # a .NET 10 PowerShell build and prepend it to PATH so every later step
+        # (and any pwsh child processes) resolves to it.
+        run: |
+          $version = '7.6.2'
+          $url = "https://github.com/PowerShell/PowerShell/releases/download/v$version/PowerShell-$version-win-x64.zip"
+          $zip = Join-Path $env:RUNNER_TEMP "PowerShell-$version.zip"
+          $dest = Join-Path $env:RUNNER_TEMP 'pwsh-7.6'
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $dest -Force
+          $dest | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          Write-Host "Installed PowerShell $version to $dest"
+      - name: Verify PowerShell runtime
+        run: |
+          Write-Host "pwsh version: $($PSVersionTable.PSVersion)"
+          Write-Host "runtime: $([System.Runtime.InteropServices.RuntimeInformation]::FrameworkDescription)"
       - name: Build and test
         run: |
           $args = @{ Configuration = 'Release'; IncludeLargeFileTests = $true }
