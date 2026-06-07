@@ -7,7 +7,7 @@ Standalone, PowerShell-free core for working with the Dropbox API v2.
 - Metadata cache, rate-limit retry, credential persistence, and a framework-neutral
   wildcard matcher.
 
-Multi-targets `netstandard2.0` and `net8.0`. Independent of `IntelliTect.Dropbox.Auth`.
+Multi-targets `netstandard2.0` and `net10.0`. Independent of `IntelliTect.Dropbox.Auth`.
 
 ## Metadata cache
 

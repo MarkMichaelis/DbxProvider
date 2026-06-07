@@ -52,7 +52,7 @@ namespace DbxProvider.Cmdlets
     public class GetDropboxCredentialCommand : PSCmdlet
     {
         private const string SingleSet = "Single";
-        private const string AllSet    = "All";
+        private const string AllSet = "All";
 
         /// <summary>Reveal the AppSecret and RefreshToken in plain text.</summary>
         [Parameter]
@@ -105,11 +105,11 @@ namespace DbxProvider.Cmdlets
         private PSObject ToPSObject(StoredAccountEntry entry)
         {
             var output = new PSObject();
-            output.Properties.Add(new PSNoteProperty("AccountId",   entry.Account.AccountId));
-            output.Properties.Add(new PSNoteProperty("Email",       entry.Account.Email));
+            output.Properties.Add(new PSNoteProperty("AccountId", entry.Account.AccountId));
+            output.Properties.Add(new PSNoteProperty("Email", entry.Account.Email));
             output.Properties.Add(new PSNoteProperty("DisplayName", entry.Account.DisplayName));
-            output.Properties.Add(new PSNoteProperty("IsDefault",   entry.IsDefault));
-            output.Properties.Add(new PSNoteProperty("AppKey",      entry.Account.AppKey));
+            output.Properties.Add(new PSNoteProperty("IsDefault", entry.IsDefault));
+            output.Properties.Add(new PSNoteProperty("AppKey", entry.Account.AppKey));
             output.Properties.Add(new PSNoteProperty("AppSecret",
                 AsPlainText ? entry.Account.AppSecret : Mask(entry.Account.AppSecret)));
             output.Properties.Add(new PSNoteProperty("RefreshToken",
@@ -169,8 +169,8 @@ namespace DbxProvider.Cmdlets
             // If a selector was supplied but didn't resolve, treat it as the
             // accountId of a fresh entry (lets users pre-create a stub).
             string? targetAccountId = existing?.Account.AccountId;
-            string? targetEmail     = existing?.Account.Email;
-            string? targetDisplay   = existing?.Account.DisplayName;
+            string? targetEmail = existing?.Account.Email;
+            string? targetDisplay = existing?.Account.DisplayName;
             if (existing == null && !string.IsNullOrEmpty(Account))
             {
                 if (Account!.StartsWith("dbid:", StringComparison.Ordinal))
@@ -190,12 +190,12 @@ namespace DbxProvider.Cmdlets
 
             CredentialStore.SaveAccount(new StoredAccount
             {
-                AppKey       = AppKey,
-                AppSecret    = AppSecret,
+                AppKey = AppKey,
+                AppSecret = AppSecret,
                 RefreshToken = RefreshToken,
-                AccountId    = targetAccountId,
-                Email        = targetEmail,
-                DisplayName  = targetDisplay
+                AccountId = targetAccountId,
+                Email = targetEmail,
+                DisplayName = targetDisplay
             }, setDefault: SetDefault.IsPresent);
 
             if (!string.IsNullOrEmpty(CredentialStore.LastSaveWarning))
@@ -210,7 +210,7 @@ namespace DbxProvider.Cmdlets
     public class RemoveDropboxCredentialCommand : PSCmdlet
     {
         private const string SingleSet = "Single";
-        private const string AllSet    = "All";
+        private const string AllSet = "All";
 
         /// <summary>
         /// Account selector to remove. When omitted (and -All is not specified),

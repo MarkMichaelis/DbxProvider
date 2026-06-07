@@ -122,10 +122,24 @@ public class SecretLeakTests
         var ext = Path.GetExtension(path).ToLowerInvariant();
         switch (ext)
         {
-            case ".dll": case ".pdb": case ".exe": case ".so": case ".dylib":
-            case ".png": case ".jpg": case ".jpeg": case ".gif": case ".ico": case ".bmp":
-            case ".zip": case ".gz": case ".7z": case ".tar": case ".nupkg":
-            case ".pfx": case ".snk":
+            case ".dll":
+            case ".pdb":
+            case ".exe":
+            case ".so":
+            case ".dylib":
+            case ".png":
+            case ".jpg":
+            case ".jpeg":
+            case ".gif":
+            case ".ico":
+            case ".bmp":
+            case ".zip":
+            case ".gz":
+            case ".7z":
+            case ".tar":
+            case ".nupkg":
+            case ".pfx":
+            case ".snk":
                 return true;
         }
         try

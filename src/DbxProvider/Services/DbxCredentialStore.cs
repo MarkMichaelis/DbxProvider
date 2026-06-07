@@ -20,8 +20,8 @@ public sealed class DbxCredentialStore : ICredentialStore
         if (cred is null) throw new ArgumentNullException(nameof(cred));
         CredentialStore.SaveAccount(new StoredAccount
         {
-            AppKey       = cred.AppKey,
-            AppSecret    = cred.AppSecret,
+            AppKey = cred.AppKey,
+            AppSecret = cred.AppSecret,
             RefreshToken = cred.RefreshToken,
         });
     }

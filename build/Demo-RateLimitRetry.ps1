@@ -55,7 +55,7 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $csproj   = Join-Path $repoRoot 'src\DbxProvider\DbxProvider.csproj'
-$moduleDll = Join-Path $repoRoot 'src\DbxProvider\bin\Release\net8.0\DbxProvider.dll'
+$moduleDll = Join-Path $repoRoot 'src\DbxProvider\bin\Release\net10.0\DbxProvider.dll'
 $helpers  = Join-Path $repoRoot 'test\DbxProvider.Pester\Helpers\TestEnvironment.psm1'
 
 function Write-Section([string]$text) {

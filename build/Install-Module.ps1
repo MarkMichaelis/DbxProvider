@@ -3,7 +3,7 @@
 # Copies the built DbxProvider module into a real PowerShell module path so
 # you can `Import-Module DbxProvider` from any session WITHOUT locking the
 # build output directory. This lets you keep iterating in
-# src\DbxProvider\bin\<Config>\net8.0 while a separate pwsh session has the
+# src\DbxProvider\bin\<Config>\net10.0 while a separate pwsh session has the
 # module loaded from the install location.
 #
 # Default install location (CurrentUser scope, PowerShell 7+):
@@ -66,7 +66,7 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot   = Split-Path -Parent $PSScriptRoot
 $projPath   = Join-Path $repoRoot 'src\DbxProvider\DbxProvider.csproj'
-$outDir     = Join-Path $repoRoot "src\DbxProvider\bin\$Configuration\net8.0"
+$outDir     = Join-Path $repoRoot "src\DbxProvider\bin\$Configuration\net10.0"
 $manifest   = Join-Path $outDir 'DbxProvider.psd1'
 
 if (-not $NoBuild) {
@@ -172,5 +172,5 @@ Write-Host "Use it from a NEW pwsh session:" -ForegroundColor Yellow
 Write-Host "  Import-Module $Name"
 Write-Host "  (Get-Module $Name).Path"
 Write-Host ""
-Write-Host "Continue building in src\DbxProvider\bin\$Configuration\net8.0;"
+Write-Host "Continue building in src\DbxProvider\bin\$Configuration\net10.0;"
 Write-Host "rerun this script to refresh the installed copy."

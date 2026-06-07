@@ -88,7 +88,7 @@ param(
     [string]$StartPath = 'Dbx:\',
     [string]$Pattern = "*'s conflicted copy*",
     [switch]$IncludeNonZero,
-    [string]$ModulePath = (Join-Path $PSScriptRoot 'src\DbxProvider\bin\Debug\net8.0\DbxProvider.psd1'),
+    [string]$ModulePath = (Join-Path $PSScriptRoot 'src\DbxProvider\bin\Debug\net10.0\DbxProvider.psd1'),
 
     # Resume an interrupted/partial run: keep the existing manifest, load the
     # paths already in it (so nothing is duplicated), and re-scan the folders

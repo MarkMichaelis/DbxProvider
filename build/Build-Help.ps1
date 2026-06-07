@@ -45,7 +45,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $repoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$moduleDir  = Join-Path $repoRoot "src\DbxProvider\bin\$Configuration\net8.0"
+$moduleDir  = Join-Path $repoRoot "src\DbxProvider\bin\$Configuration\net10.0"
 $moduleDll  = Join-Path $moduleDir 'DbxProvider.dll'
 $psdPath    = Join-Path $repoRoot 'src\DbxProvider\DbxProvider.psd1'
 $helpRoot   = Join-Path $repoRoot 'docs\help\en-US'
@@ -79,6 +79,19 @@ if (-not $exported) {
     throw "No CmdletsToExport found in $psdPath."
 }
 Write-Section "Exported cmdlets: $($exported.Count)"
+
+# A PowerShell binary module can only be imported by a host running the same
+# (or newer) .NET major version it was built for. When the module targets a
+# newer runtime than the current host (e.g. a net10.0 module under PowerShell
+# 7.4, which runs on .NET 8), importing it fails with a System.Runtime load
+# error. Skip help generation with a clear warning rather than failing the
+# whole build; a matching PowerShell (7.6+ for net10.0) regenerates the help.
+$requiredMajor = if ($moduleDir -match 'net(\d+)\.0') { [int]$Matches[1] } else { 0 }
+$hostMajor     = [System.Environment]::Version.Major
+if ($requiredMajor -gt $hostMajor) {
+    Write-Warning "Skipping help generation: module targets net$requiredMajor.0 but this PowerShell host runs on .NET $hostMajor. Run on a PowerShell built for .NET $requiredMajor (PowerShell 7.6+ for net10.0) to build help."
+    return
+}
 
 # Import the freshly-built module into a child runspace-equivalent (this
 # session) so platyPS can reflect on it.
