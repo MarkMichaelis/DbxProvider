@@ -67,6 +67,24 @@ namespace DbxProvider.Cmdlets
         public string DriveName { get; set; } = "Dbx";
 
         /// <summary>
+        /// Local folder (or NAS share) that mirrors this Dropbox account's files.
+        /// When set, file downloads first serve a verified-equal local copy from
+        /// here instead of transferring bytes over the Dropbox API, avoiding
+        /// network latency and API rate limits. When omitted, the Dropbox desktop
+        /// folder is auto-detected from the client's <c>info.json</c>. Use
+        /// <see cref="NoLocalMirror"/> to disable the accelerator entirely.
+        /// </summary>
+        [Parameter]
+        public string? LocalMirrorRoot { get; set; }
+
+        /// <summary>
+        /// Disable the local-mirror read accelerator even when a Dropbox desktop
+        /// folder is present and could be auto-detected.
+        /// </summary>
+        [Parameter]
+        public SwitchParameter NoLocalMirror { get; set; }
+
+        /// <summary>
         /// Cancelled when the pipeline stops (Ctrl+C) via <see cref="StopProcessing"/>.
         /// Threaded into the loopback OAuth flow and the Playwright app-registration
         /// wizard so both blocking operations unblock promptly on cancellation.
@@ -114,8 +132,8 @@ namespace DbxProvider.Cmdlets
                         return;
                     }
 
-                    appKey       ??= saved?.Account.AppKey;
-                    appSecret    ??= saved?.Account.AppSecret;
+                    appKey ??= saved?.Account.AppKey;
+                    appSecret ??= saved?.Account.AppSecret;
                     refreshToken ??= saved?.Account.RefreshToken;
 
                     // No matching saved account and no -AppKey on the command line
@@ -132,7 +150,7 @@ namespace DbxProvider.Cmdlets
                         var registered = PromptForNewAppRegistration(RedirectPort);
                         if (registered != null)
                         {
-                            appKey    = registered.Value.AppKey;
+                            appKey = registered.Value.AppKey;
                             appSecret = registered.Value.AppSecret;
                         }
                     }
@@ -177,12 +195,12 @@ namespace DbxProvider.Cmdlets
                 {
                     CredentialStore.SaveAccount(new StoredAccount
                     {
-                        AppKey       = appKey,
-                        AppSecret    = appSecret,
+                        AppKey = appKey,
+                        AppSecret = appSecret,
                         RefreshToken = refreshToken,
-                        AccountId    = account.AccountId,
-                        Email        = account.Email,
-                        DisplayName  = account.DisplayName
+                        AccountId = account.AccountId,
+                        Email = account.Email,
+                        DisplayName = account.DisplayName
                     });
                     if (!string.IsNullOrEmpty(CredentialStore.LastSaveWarning))
                         WriteWarning(CredentialStore.LastSaveWarning);
@@ -206,6 +224,8 @@ namespace DbxProvider.Cmdlets
                 var driveInfo = new PSDriveInfo(
                     effectiveDriveName, SessionState.Provider.GetOne("Dropbox"),
                     "\\", $"Dropbox ({account.Email})", null);
+
+                ConfigureLocalMirrorInline(service);
 
                 var dbxDrive = new DropboxDriveInfo(driveInfo, service);
                 dbxDrive.InitializeCache(account.AccountId, account.Email);
@@ -242,6 +262,39 @@ namespace DbxProvider.Cmdlets
                 _stopCts?.Dispose();
                 _stopCts = null;
             }
+        }
+
+        /// <summary>
+        /// Configures the local-mirror read accelerator on <paramref name="service"/>.
+        /// Uses <see cref="LocalMirrorRoot"/> when supplied, otherwise auto-detects
+        /// the Dropbox desktop folder from the client's <c>info.json</c>. Does
+        /// nothing when <see cref="NoLocalMirror"/> is set or no usable root is
+        /// found, so downloads simply use the API.
+        /// </summary>
+        private void ConfigureLocalMirrorInline(DropboxServiceClient service)
+        {
+            if (NoLocalMirror.IsPresent)
+            {
+                return;
+            }
+
+            bool explicitRoot = !string.IsNullOrEmpty(LocalMirrorRoot);
+            string? root = explicitRoot ? LocalMirrorRoot : DropboxMirrorLocator.FindLocalRoot();
+
+            if (string.IsNullOrEmpty(root))
+            {
+                WriteVerbose("No local Dropbox mirror specified or detected; downloads use the API.");
+                return;
+            }
+
+            if (!System.IO.Directory.Exists(root))
+            {
+                WriteWarning($"Local mirror root '{root}' does not exist; downloads use the API.");
+                return;
+            }
+
+            service.Mirror = new LocalMirrorResolver(new LocalMirrorOptions { Root = root });
+            WriteVerbose($"Local mirror enabled at '{root}'.");
         }
 
         private (string AccessToken, string? RefreshToken) RunOAuthFlow(string appKey, string? appSecret, int port)
@@ -509,7 +562,7 @@ namespace DbxProvider.Cmdlets
         {
             var atIdx = email.IndexOf('@');
             if (atIdx <= 0) return string.Empty;
-            var local  = SanitizeDriveName(email.Substring(0, atIdx));
+            var local = SanitizeDriveName(email.Substring(0, atIdx));
             var domain = email.Substring(atIdx + 1);
             if (string.IsNullOrEmpty(local)) return string.Empty;
 

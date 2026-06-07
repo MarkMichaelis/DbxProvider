@@ -109,6 +109,11 @@ namespace IntelliTect.Dropbox
                 var period = TimeSpan.FromSeconds(_options.FlushIntervalSeconds);
                 _flushTimer = new Timer(_ => SafeFlush(), null, period, period);
             }
+
+            // Let the local-mirror read accelerator obtain content hashes from
+            // this cursor-validated cache instead of a metadata API round-trip.
+            _service.CachedMetadataProvider = path =>
+                TryGetItemMetadata(path, out var item) ? item : null;
         }
 
         public CacheOptions Options => _options;
@@ -503,7 +508,28 @@ namespace IntelliTect.Dropbox
             return false;
         }
 
-        /// <summary>Eagerly run validate-and-merge for a path (or all resident paths if null).</summary>
+        /// <summary>
+        /// Looks up a single file's already-cached metadata from its parent
+        /// folder's entry without contacting Dropbox or validating the cursor.
+        /// Returns <see langword="false"/> when the cache is disabled, the parent
+        /// folder is not cached, or the child is absent. Intended as a
+        /// zero-network <c>content_hash</c> source for the local-mirror read
+        /// accelerator.
+        /// </summary>
+        public bool TryGetItemMetadata(string path, out DropboxItem? item)
+        {
+            item = null;
+            if (!_options.Enabled) return false;
+
+            var parent = ParentOf(path);
+            if (parent is null) return false;
+
+            if (!TryGet(parent, out var entry) || entry is null) return false;
+
+            var key = MakeKey(path);
+            item = entry.Items.FirstOrDefault(i => MakeKey(i.Path) == key);
+            return item is not null;
+        }
         public async Task UpdateAsync(string? path = null, CancellationToken cancellationToken = default)
         {
             if (path != null)
@@ -958,6 +984,10 @@ namespace IntelliTect.Dropbox
         {
             if (_disposed) return;
             _disposed = true;
+            if (ReferenceEquals(_service.CachedMetadataProvider?.Target, this))
+            {
+                _service.CachedMetadataProvider = null;
+            }
             try { _flushTimer?.Dispose(); } catch { }
             try { Flush(); } catch { }
             try { _db.Dispose(); } catch { }

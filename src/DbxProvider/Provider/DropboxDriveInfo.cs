@@ -50,5 +50,17 @@ namespace DbxProvider.Provider
     {
         [Parameter(Mandatory = true)]
         public string AccessToken { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Optional local folder (or NAS share) mirroring this account. When set,
+        /// verified-equal files are read locally instead of via the API. When
+        /// omitted, the Dropbox desktop folder is auto-detected from info.json.
+        /// </summary>
+        [Parameter]
+        public string? LocalMirrorRoot { get; set; }
+
+        /// <summary>Disable the local-mirror read accelerator entirely.</summary>
+        [Parameter]
+        public SwitchParameter NoLocalMirror { get; set; }
     }
 }

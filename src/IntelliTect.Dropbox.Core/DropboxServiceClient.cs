@@ -43,6 +43,24 @@ namespace IntelliTect.Dropbox
             _client = client;
         }
 
+        /// <summary>
+        /// Optional local-mirror read accelerator. When set and enabled, file
+        /// downloads first attempt to serve a verified-equal local copy (from the
+        /// Dropbox desktop folder or a NAS share) instead of transferring bytes
+        /// over the Dropbox API. Any miss falls back transparently to the API.
+        /// </summary>
+        public LocalMirrorResolver? Mirror { get; set; }
+
+        /// <summary>
+        /// Optional source of already-known item metadata, typically the
+        /// cursor-validated metadata cache. When set, the local-mirror
+        /// accelerator consults this first to obtain a file's
+        /// <c>content_hash</c>, avoiding a metadata API round-trip on a cache
+        /// hit. A <see langword="null"/> result, or a cached item without a
+        /// <c>content_hash</c>, falls back transparently to a live metadata
+        /// lookup.
+        /// </summary>
+        public Func<string, DropboxItem?>? CachedMetadataProvider { get; set; }
 
         // --- Rate limiting / cancellation infrastructure ---
         private IRateLimitNotifier? _rateLimitNotifier;
@@ -242,7 +260,18 @@ namespace IntelliTect.Dropbox
         #region Files - Download / Upload
 
         public Task<(Stream Content, DropboxItem Metadata)> DownloadAsync(string path, CancellationToken cancellationToken = default) =>
-            RetryAsync(_ => DownloadCoreAsync(path), cancellationToken);
+            DownloadWithMirrorAsync(path, cancellationToken);
+
+        private async Task<(Stream Content, DropboxItem Metadata)> DownloadWithMirrorAsync(string path, CancellationToken cancellationToken)
+        {
+            var hit = await TryReadFromMirrorAsync(path, cancellationToken).ConfigureAwait(false);
+            if (hit is not null)
+            {
+                return (hit.Value.Stream, hit.Value.Master);
+            }
+
+            return await RetryAsync(_ => DownloadCoreAsync(path), cancellationToken).ConfigureAwait(false);
+        }
 
         private async Task<(Stream Content, DropboxItem Metadata)> DownloadCoreAsync(string path)
         {
@@ -251,12 +280,78 @@ namespace IntelliTect.Dropbox
         }
 
         public Task<byte[]> DownloadBytesAsync(string path, CancellationToken cancellationToken = default) =>
-            RetryAsync(_ => DownloadBytesCoreAsync(path), cancellationToken);
+            DownloadBytesWithMirrorAsync(path, cancellationToken);
+
+        private async Task<byte[]> DownloadBytesWithMirrorAsync(string path, CancellationToken cancellationToken)
+        {
+            var hit = await TryReadFromMirrorAsync(path, cancellationToken).ConfigureAwait(false);
+            if (hit is not null)
+            {
+                using Stream local = hit.Value.Stream;
+                using var buffer = new MemoryStream();
+                await local.CopyToAsync(buffer, 81920, cancellationToken).ConfigureAwait(false);
+                return buffer.ToArray();
+            }
+
+            return await RetryAsync(_ => DownloadBytesCoreAsync(path), cancellationToken).ConfigureAwait(false);
+        }
 
         private async Task<byte[]> DownloadBytesCoreAsync(string path)
         {
             var response = await _client.Files.DownloadAsync(NormalizePath(path));
             return await response.GetContentAsByteArrayAsync();
+        }
+
+        /// <summary>
+        /// Attempts to satisfy a download from the configured local mirror. Looks
+        /// up the authoritative metadata (so the local file can be verified by
+        /// <c>content_hash</c>) and returns an open local stream plus that
+        /// metadata on a verified hit; otherwise returns <see langword="null"/> so
+        /// the caller falls back to an API download. A metadata lookup failure is
+        /// treated as a miss -- the subsequent API download surfaces the real
+        /// error -- but cancellation is never swallowed.
+        /// </summary>
+        private async Task<(Stream Stream, DropboxItem Master)?> TryReadFromMirrorAsync(string path, CancellationToken cancellationToken)
+        {
+            LocalMirrorResolver? mirror = Mirror;
+            if (mirror is null || !mirror.Options.Enabled || string.IsNullOrEmpty(mirror.Options.Root))
+            {
+                return null;
+            }
+
+            DropboxItem? master = TryGetCachedMaster(path);
+            if (master is null)
+            {
+                try
+                {
+                    master = await GetMetadataAsync(path, cancellationToken: cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    return null;
+                }
+            }
+
+            Stream? local = mirror.TryOpenVerified(path, master);
+            return local is null ? null : (local, master);
+        }
+
+        /// <summary>
+        /// Returns already-cached master metadata for <paramref name="path"/>
+        /// when the <see cref="CachedMetadataProvider"/> supplies an entry that
+        /// carries a usable <c>content_hash</c>; otherwise <see langword="null"/>
+        /// so the caller performs a live metadata lookup. Never contacts Dropbox.
+        /// </summary>
+        private DropboxItem? TryGetCachedMaster(string path)
+        {
+            Func<string, DropboxItem?>? provider = CachedMetadataProvider;
+            if (provider is null)
+            {
+                return null;
+            }
+
+            DropboxItem? cached = provider(path);
+            return string.IsNullOrEmpty(cached?.ContentHash) ? null : cached;
         }
 
         public virtual Task<DropboxItem> UploadAsync(string path, Stream content, WriteMode? mode = null, CancellationToken cancellationToken = default) =>

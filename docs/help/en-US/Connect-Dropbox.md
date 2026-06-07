@@ -16,14 +16,14 @@ Authenticates to Dropbox and creates a PSDrive for the account.
 ### OAuth (Default)
 ```
 Connect-Dropbox [-AppKey <String>] [-AppSecret <String>] [-RefreshToken <String>] [-Account <String>]
- [-RedirectPort <Int32>] [-NoSave] [-DriveName <String>] [-ProgressAction <ActionPreference>]
- [<CommonParameters>]
+ [-RedirectPort <Int32>] [-NoSave] [-DriveName <String>] [-LocalMirrorRoot <String>] [-NoLocalMirror]
+ [-ProgressAction <ActionPreference>] [<CommonParameters>]
 ```
 
 ### Token
 ```
-Connect-Dropbox [-AccessToken] <String> [-DriveName <String>] [-ProgressAction <ActionPreference>]
- [<CommonParameters>]
+Connect-Dropbox [-AccessToken] <String> [-DriveName <String>] [-LocalMirrorRoot <String>] [-NoLocalMirror]
+ [-ProgressAction <ActionPreference>] [<CommonParameters>]
 ```
 
 ## DESCRIPTION
@@ -162,6 +162,46 @@ to multiple Dropbox accounts in the same session.
 
 ```yaml
 Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -LocalMirrorRoot
+
+Filesystem path to a local or NAS copy of the Dropbox tree (for example the
+Dropbox desktop folder, or a NAS mirror). When supplied, file reads are served
+from this local copy instead of the Dropbox API whenever the local file is
+provably byte-identical to the Dropbox master (verified via the Dropbox
+`content_hash`). When omitted, the Dropbox desktop client's folder is
+auto-detected from its `info.json`. Use `-NoLocalMirror` to disable the
+accelerator entirely.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -NoLocalMirror
+
+Disables the local-mirror read accelerator. All file reads go through the
+Dropbox API even when a local copy exists. Overrides `-LocalMirrorRoot` and
+auto-detection.
+
+```yaml
+Type: SwitchParameter
 Parameter Sets: (All)
 Aliases:
 

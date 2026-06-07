@@ -81,6 +81,9 @@ internal sealed class FakeListServiceClient : DropboxServiceClient
         return (parts[1], int.Parse(parts[2]));
     }
 
+    public override Task<DropboxAccount> GetCurrentAccountAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(new DropboxAccount { AccountId = "fake-account", Email = "fake@example.com", DisplayName = "Fake" });
+
     public override Task<List<DropboxItem>> ListFolderAsync(string path, bool recursive = false, bool includeDeleted = false, CancellationToken cancellationToken = default)
     {
         var norm = NormalizePath(path);
