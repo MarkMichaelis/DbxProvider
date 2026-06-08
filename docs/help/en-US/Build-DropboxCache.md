@@ -16,7 +16,7 @@ file's revision history.
 ## SYNTAX
 
 ```
-Build-DropboxCache [[-Path] <String>] [-IncludeRevisions] [-DriveName <String>]
+Build-DropboxCache [[-Path] <String>] [-IncludeRevisions] [-Refresh] [-Rebuild] [-DriveName <String>]
  [-ProgressAction <ActionPreference>] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
@@ -45,6 +45,13 @@ With `-IncludeRevisions`, the command runs a second pass that fetches and caches
 the revision history of every file in the subtree. Files whose revisions were
 fetched recently are skipped, so this pass is also resumable and cheap to
 repeat. Progress is reported via `Write-Progress`.
+
+On a normal build the command also captures an account-wide Dropbox delta cursor
+(if one is not already saved) before walking the tree. This cursor anchors the
+incremental refresh. Pass `-Refresh` to instead drain every change since that
+cursor into the cache -- a cheap update that avoids re-walking the whole account.
+Pass `-Rebuild` to wipe the cache (entries and build progress) and rebuild from a
+freshly captured cursor. `-Refresh` and `-Rebuild` cannot be combined.
 
 If the cache is disabled (`Set-DropboxCacheOption -Disable`), the command warns
 and does nothing.
@@ -83,6 +90,21 @@ PS> Build-DropboxCache -WhatIf
 ```
 
 Shows what the command would build without modifying the cache.
+
+### Example 5
+```powershell
+PS> Build-DropboxCache -Refresh
+```
+
+Drains every Dropbox change since the captured cursor into the cache instead of
+rebuilding.
+
+### Example 6
+```powershell
+PS> Build-DropboxCache -Rebuild
+```
+
+Wipes the cache and the saved cursor and rebuilds from a freshly captured cursor.
 
 ## PARAMETERS
 
@@ -132,6 +154,41 @@ Aliases:
 Required: False
 Position: 0
 Default value: /
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Rebuild
+
+Wipe the entire cache (entries and build progress) and the saved delta cursor,
+then rebuild from a freshly captured cursor. Cannot be combined with `-Refresh`.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Refresh
+
+Drain account-wide Dropbox changes since the captured delta cursor into the
+cache instead of building. This is the incremental refresh path. Cannot be
+combined with `-Rebuild`.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
 Accept pipeline input: False
 Accept wildcard characters: False
 ```
@@ -199,8 +256,10 @@ This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable
 
 ### System.Management.Automation.PSObject
 
-A summary with `DriveName`, `Path`, `FoldersCached`, `ItemsFound`,
-`FilesWithRevisionsCached`, and `RevisionsCached`.
+A build summary with `DriveName`, `Path`, `FoldersCached`, `ItemsFound`,
+`FilesWithRevisionsCached`, and `RevisionsCached`. With `-Refresh`, a refresh
+summary with `DriveName`, `Mode`, `DeltaPages`, `ItemsAdded`, `ItemsRemoved`,
+and `ResetRequired` instead.
 
 ## NOTES
 
