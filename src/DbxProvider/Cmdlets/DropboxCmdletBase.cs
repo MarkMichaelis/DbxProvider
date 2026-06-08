@@ -69,13 +69,22 @@ namespace DbxProvider.Cmdlets
                 $"Drive '{DriveName}:' is not a Dropbox drive. Use Connect-Dropbox first.");
         }
 
-        /// <summary>Strips a drive qualifier (e.g. <c>Dbx:</c>) from a path,
-        /// leaving the Dropbox-relative path. Shared by the cache finders.</summary>
-        protected static string StripDrivePrefix(string path)
+        /// <summary>Strips a leading drive qualifier (e.g. <c>Dbx:</c>) from a
+        /// path, leaving the Dropbox-relative path. Only a qualifier at the very
+        /// start is removed: if a path separator appears before the colon (for
+        /// example <c>/Project:Notes</c>), the colon belongs to the path and the
+        /// value is returned unchanged. Shared by the cache finders.</summary>
+        internal static string StripDrivePrefix(string path)
         {
             if (string.IsNullOrEmpty(path)) return string.Empty;
+
             int colon = path.IndexOf(':');
-            return colon >= 0 ? path.Substring(colon + 1) : path;
+            if (colon < 0) return path;
+
+            int separator = path.IndexOfAny(new[] { '/', '\\' });
+            if (separator >= 0 && separator < colon) return path;
+
+            return path.Substring(colon + 1);
         }
 
         private const int RefreshProgressId = 1900;

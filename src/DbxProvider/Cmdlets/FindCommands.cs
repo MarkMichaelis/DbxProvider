@@ -20,6 +20,7 @@ namespace DbxProvider.Cmdlets
         /// <summary>Filename wildcard (PowerShell -like semantics) matched against
         /// each item's name. Defaults to '*' (every item).</summary>
         [Parameter(Position = 0)]
+        [SupportsWildcards()]
         public string Name { get; set; } = "*";
 
         /// <summary>Dropbox path (or drive path such as <c>Dbx:\Folder</c>) to

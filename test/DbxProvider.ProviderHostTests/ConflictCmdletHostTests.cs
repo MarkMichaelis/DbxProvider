@@ -62,6 +62,18 @@ $ExecutionContext.SessionState.Drive.New($dbx, 'global') | Out-Null
         return sb.ToString();
     }
 
+    [Theory]
+    [InlineData("Dbx:\\Folder", "\\Folder")]   // leading drive qualifier removed
+    [InlineData("Dbx:/A/B", "/A/B")]           // leading drive qualifier removed
+    [InlineData("Dbx:", "")]                    // bare drive root
+    [InlineData("/A/B", "/A/B")]               // no qualifier, unchanged
+    [InlineData("/Project:Notes", "/Project:Notes")] // colon inside path is preserved
+    [InlineData("", "")]                        // empty stays empty
+    public void StripDrivePrefix_RemovesOnlyLeadingDriveQualifier(string input, string expected)
+    {
+        Assert.Equal(expected, DropboxCmdletBase.StripDrivePrefix(input));
+    }
+
     [Fact]
     public void FindDropboxConflict_ReadsCache_EmitsZeroByteMatch_WithoutFullEnumeration()
     {
