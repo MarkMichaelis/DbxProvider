@@ -30,8 +30,7 @@ cursor (the shared refresh used by every cache-backed cmdlet): it drains the
 changes recorded since the last sync, showing a transient progress message and
 reporting how many items were added or removed. When the cache has never
 captured a delta cursor it captures a baseline and skips the drain; when Dropbox
-rejects the saved cursor it warns you to run `Build-DropboxCacheAll.ps1
--Rebuild`.
+rejects the saved cursor it warns you to run `Build-DropboxCacheAll.ps1 -Rebuild`.
 
 Populate the cache first with `Build-DropboxCacheAll.ps1` (or `Build-DropboxCache`).
 For the server-side indexed search (Dropbox `search_v2`) use `Search-Dropbox`

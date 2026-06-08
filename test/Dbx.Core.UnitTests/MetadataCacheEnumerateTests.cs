@@ -145,4 +145,38 @@ public sealed class MetadataCacheEnumerateTests : IDisposable
         items.Should().Contain("/A/B/file.txt");
         items.Should().NotContain("/A/file2.txt");
     }
+
+    [Fact]
+    public async Task FindItems_EmptyPathItems_AreNotCollapsedByDedup()
+    {
+        string dbPath;
+        {
+            var service = new FakeListServiceClient(SampleTree());
+            using var cache = new MetadataCache(service, "acct", "user@example.com", Opts());
+            await cache.BuildAsync("/");
+            dbPath = cache.DatabasePath;
+        }
+
+        // Two distinct items that both have an empty Path (as a malformed row
+        // could yield). De-duplication by path must not collapse them into one.
+        var twoEmptyPath =
+            @"[{""path"":"""",""name"":""dup1"",""isFolder"":false,""length"":0}," +
+            @"{""path"":"""",""name"":""dup2"",""isFolder"":false,""length"":0}]";
+        var connectionString = new SqliteConnectionStringBuilder { DataSource = dbPath }.ToString();
+        using (var conn = new SqliteConnection(connectionString))
+        {
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE entries SET items_json = $j WHERE items_json LIKE '%file2.txt%';";
+            cmd.Parameters.AddWithValue("$j", twoEmptyPath);
+            cmd.ExecuteNonQuery().Should().Be(1);
+        }
+
+        var service2 = new FakeListServiceClient(SampleTree());
+        using var reopened = new MetadataCache(service2, "acct", "user@example.com", Opts());
+
+        var matches = reopened.FindItems(i => i.Name == "dup1" || i.Name == "dup2");
+
+        matches.Select(i => i.Name).Should().BeEquivalentTo(new[] { "dup1", "dup2" });
+    }
 }
