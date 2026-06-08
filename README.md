@@ -350,6 +350,36 @@ Search-Dropbox "Q4*.xlsx" -Wildcard -Path /Finance/2025
 > Use `-FileExtensions` for server-side extension filtering, or `-Wildcard`
 > to apply true PowerShell glob semantics on top of the search results.
 
+### Find in the local cache (zero-API)
+```powershell
+# Find by filename wildcard (-like semantics) across the whole account
+Find-DropboxItem -Name '*.pdf'
+
+# Scope to a subtree and/or restrict to zero-byte files
+Find-DropboxItem -Name 'budget*' -Path 'Dbx:\Finance'
+Find-DropboxItem -Name '*' -ZeroByteOnly | Measure-Object
+
+# Find zero-byte "conflicted copy" files (delegates to Find-DropboxItem with the
+# conflict pattern + zero-byte filter), then preview deleting them
+Find-DropboxConflict
+Find-DropboxConflict -Path 'Dbx:\Projects' | Remove-DropboxItemBatch -WhatIf
+
+# Also include conflict files that are not zero bytes
+Find-DropboxConflict -IncludeNonZero
+```
+
+`Find-DropboxItem` and `Find-DropboxConflict` read the local SQLite metadata
+cache instead of enumerating the Dropbox API, so they return in seconds even on
+accounts with millions of items. Both auto-refresh the cache from the account
+delta cursor first (a transient progress bar shows the drain, then reports
+`Refreshed cache: N added, M removed`); build or refresh the cache with
+`Build-DropboxCacheAll.ps1` (use `-Rebuild` if Dropbox rejects the saved cursor).
+
+> **Find vs Search.** `Find-*` reads the local metadata cache (zero API; name and
+> size only). `Search-Dropbox` queries Dropbox's server-side `search_v2` index
+> (filename and content tokens). Use `Find-DropboxItem` for fast, repeatable
+> name/size sweeps over a built cache; use `Search-Dropbox` for content search.
+
 ### Provider performance — when wildcards use search
 
 The provider's `Get-ChildItem`/`Test-Path` automatically route to the indexed
