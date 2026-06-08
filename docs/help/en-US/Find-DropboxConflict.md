@@ -9,31 +9,37 @@ schema: 2.0.0
 
 ## SYNOPSIS
 
-Finds Dropbox "conflicted copy" files, using a saved cursor to make repeat scans cheap.
+Finds Dropbox "conflicted copy" files from the local metadata cache, with zero API enumeration.
 
 ## SYNTAX
 
 ```
 Find-DropboxConflict [[-Path] <String>] [-Pattern <String>] [-IncludeNonZero] [-StatePath <String>]
- [-Full] [-DriveName <String>] [-ProgressAction <ActionPreference>] [<CommonParameters>]
+ [-DriveName <String>] [-ProgressAction <ActionPreference>] [<CommonParameters>]
 ```
 
 ## DESCRIPTION
 
-Scans a Dropbox subtree for zero-byte (or, with `-IncludeNonZero`, all)
-"conflicted copy" files. The first run does a full recursive enumeration and
-persists the resulting account cursor and match set to a JSON sidecar file.
-Subsequent runs fetch only the delta (adds, updates, removes) since that cursor
-instead of re-walking the whole tree, which makes repeat scans dramatically
-cheaper on large accounts.
+Finds zero-byte (or, with `-IncludeNonZero`, all) "conflicted copy" files under
+a Dropbox subtree by reading the local metadata cache. It delegates to the same
+cache finder as `Find-DropboxItem`, fixing the conflict pattern and the zero-byte
+filter, so it never performs the multi-hour recursive enumeration the old API
+scan required.
 
-The scan transparently falls back to a full pass when the saved cursor is
-rejected by Dropbox (expired/reset) or when any scan parameter (`-Path`,
-`-Pattern`, `-IncludeNonZero`, or the account) differs from the saved state.
-Pass `-Full` to ignore saved state and force a full enumeration.
+Before reading, the cmdlet auto-refreshes the cache from the account delta
+cursor (the shared refresh used by every cache-backed cmdlet): it drains the
+changes since the last sync, shows a transient progress message, and reports how
+many items were added or removed. When Dropbox rejects the saved cursor it warns
+you to run `Build-DropboxCacheAll.ps1 -Rebuild`. Populate the cache first with
+`Build-DropboxCacheAll.ps1` (or `Build-DropboxCache`).
 
 Each match is emitted as an object with `Path` and `Bytes` properties, so the
-results compose directly with `Remove-DropboxItemBatch`.
+results compose directly with `Remove-DropboxItemBatch`. Only files (never
+folders) are returned, which keeps the result safe to delete.
+
+If a `*.state.json` sidecar from an earlier (pre-cache) version is found, it is
+archived to a `.bak` file rather than read -- the cache is now authoritative --
+so upgrading neither errors nor loses the saved data.
 
 ## EXAMPLES
 
@@ -42,21 +48,21 @@ results compose directly with `Remove-DropboxItemBatch`.
 PS> Find-DropboxConflict
 ```
 
-Scans the whole drive. The first run is a full pass; later runs are incremental.
+Lists every zero-byte conflict file in the account, straight from the cache.
 
 ### Example 2
 ```powershell
 PS> Find-DropboxConflict -Path 'Dbx:\Projects' | Remove-DropboxItemBatch -WhatIf
 ```
 
-Scans just the `Projects` subtree and previews deleting the matches.
+Lists conflict files under the `Projects` subtree and previews deleting them.
 
 ### Example 3
 ```powershell
-PS> Find-DropboxConflict -Full -IncludeNonZero
+PS> Find-DropboxConflict -IncludeNonZero
 ```
 
-Forces a full re-enumeration and also captures non-zero-byte conflict files.
+Also includes conflict files that are not zero bytes.
 
 ## PARAMETERS
 
@@ -80,7 +86,7 @@ Accept wildcard characters: False
 ### -Pattern
 
 Filename `-like` wildcard that identifies a conflict file. Defaults to
-`*'s conflicted copy*`. Changing it invalidates any saved incremental state.
+`*'s conflicted copy*`.
 
 ```yaml
 Type: String
@@ -91,7 +97,7 @@ Required: False
 Position: Named
 Default value: *'s conflicted copy*
 Accept pipeline input: False
-Accept wildcard characters: False
+Accept wildcard characters: True
 ```
 
 ### -IncludeNonZero
@@ -113,8 +119,10 @@ Accept wildcard characters: False
 
 ### -StatePath
 
-Path to the JSON sidecar state file that holds the saved cursor and match set.
-Defaults to a per-account/path/pattern file under the system temp folder.
+Path to a legacy `*.state.json` sidecar (written by a pre-cache version) to
+migrate. When present and recognized, the sidecar is archived to a `.bak` file;
+conflict finding itself is cache-backed and needs no sidecar. When omitted, the
+obsolete per-account default location under the system temp folder is checked.
 
 ```yaml
 Type: String
@@ -124,23 +132,6 @@ Aliases:
 Required: False
 Position: Named
 Default value: None
-Accept pipeline input: False
-Accept wildcard characters: False
-```
-
-### -Full
-
-Ignore any saved state and force a full recursive enumeration, then save fresh
-state for the next incremental run.
-
-```yaml
-Type: SwitchParameter
-Parameter Sets: (All)
-Aliases:
-
-Required: False
-Position: Named
-Default value: False
 Accept pipeline input: False
 Accept wildcard characters: False
 ```
@@ -190,5 +181,8 @@ This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable
 ### IntelliTect.Dropbox.ConflictMatch
 
 ## NOTES
+
+Reads only the local metadata cache; it does not contact Dropbox for the
+enumeration. Build or refresh the cache with `Build-DropboxCacheAll.ps1`.
 
 ## RELATED LINKS
