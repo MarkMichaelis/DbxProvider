@@ -221,6 +221,56 @@ namespace IntelliTect.Dropbox
         }
 
         /// <summary>
+        /// Streams every cached item at or below <paramref name="startPath"/>
+        /// straight from the local database, without contacting Dropbox. Dirty
+        /// resident entries are flushed first so the on-disk view is
+        /// authoritative, then each folder's item list is read and yielded one
+        /// entry at a time -- the full item set (which can be millions of rows)
+        /// is never materialized at once. The database lock is taken per entry
+        /// and released before any item is yielded, so a consumer may safely
+        /// call back into the cache while enumerating.
+        /// </summary>
+        /// <param name="startPath">Subtree root; empty or "/" enumerates the
+        /// whole account.</param>
+        public IEnumerable<DropboxItem> EnumerateItems(string startPath = "")
+        {
+            Flush();
+
+            var startKey = MakeKey(startPath);
+            foreach (var key in LoadEntryKeysUnder(startKey))
+            {
+                var items = TryLoadEntryItems(key);
+                if (items == null) continue;
+                foreach (var item in items)
+                {
+                    yield return item;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Returns every cached item at or below <paramref name="startPath"/>
+        /// that satisfies <paramref name="predicate"/>, de-duplicated by path
+        /// (case-insensitive). Reads the local database only; issues no Dropbox
+        /// API calls.
+        /// </summary>
+        public List<DropboxItem> FindItems(Func<DropboxItem, bool> predicate, string startPath = "")
+        {
+            if (predicate == null) throw new ArgumentNullException(nameof(predicate));
+
+            var results = new List<DropboxItem>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in EnumerateItems(startPath))
+            {
+                if (predicate(item) && seen.Add(item.Path))
+                {
+                    results.Add(item);
+                }
+            }
+            return results;
+        }
+
+        /// <summary>
         /// Returns the cached child items for <paramref name="path"/>,
         /// validating the cursor first. On cache miss, full-enumerates and
         /// stores the result. Always reflects the latest server state.
@@ -1005,6 +1055,71 @@ namespace IntelliTect.Dropbox
                 entry.Dirty = false;
             }
         }
+
+        /// <summary>Loads the keys of every persisted entry at or below
+        /// <paramref name="startKey"/>. An empty key selects the whole account.
+        /// The subtree query matches the start entry itself plus any descendant
+        /// whose key begins with <c>startKey + "/"</c>, with LIKE metacharacters
+        /// in the key escaped so paths containing <c>%</c> or <c>_</c> cannot
+        /// over-match.</summary>
+        private List<string> LoadEntryKeysUnder(string startKey)
+        {
+            var keys = new List<string>();
+            lock (_diskLock)
+            {
+                using var cmd = _db.CreateCommand();
+                if (string.IsNullOrEmpty(startKey))
+                {
+                    cmd.CommandText = "SELECT path_lower FROM entries;";
+                }
+                else
+                {
+                    cmd.CommandText =
+                        "SELECT path_lower FROM entries " +
+                        "WHERE path_lower = $k OR path_lower LIKE $p ESCAPE '\\';";
+                    cmd.Parameters.AddWithValue("$k", startKey);
+                    cmd.Parameters.AddWithValue("$p", EscapeLike(startKey) + "/%");
+                }
+
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    keys.Add(reader.GetString(0));
+                }
+            }
+            return keys;
+        }
+
+        /// <summary>Reads and deserializes a single entry's item list from the
+        /// database, returning <c>null</c> when the row is absent or corrupt.</summary>
+        private List<DropboxItem>? TryLoadEntryItems(string key)
+        {
+            lock (_diskLock)
+            {
+                using var cmd = _db.CreateCommand();
+                cmd.CommandText = "SELECT items_json FROM entries WHERE path_lower = $k;";
+                cmd.Parameters.AddWithValue("$k", key);
+
+                using var reader = cmd.ExecuteReader();
+                if (!reader.Read()) return null;
+
+                try
+                {
+                    return JsonSerializer.Deserialize<List<DropboxItem>>(reader.GetString(0), JsonOpts)
+                           ?? new List<DropboxItem>();
+                }
+                catch
+                {
+                    return null; // skip corrupt row
+                }
+            }
+        }
+
+        /// <summary>Escapes SQLite LIKE metacharacters (<c>\</c>, <c>%</c>,
+        /// <c>_</c>) so a literal subtree key cannot act as a wildcard. Pairs
+        /// with <c>ESCAPE '\'</c> in the query.</summary>
+        private static string EscapeLike(string value) =>
+            value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
         private void UpsertEntry(Entry entry)
         {
