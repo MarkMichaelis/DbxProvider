@@ -215,6 +215,26 @@ namespace IntelliTect.Dropbox
             return delta;
         }
 
+        /// <summary>
+        /// Returns a cursor describing the current state of <paramref name="path"/>
+        /// via <c>/files/list_folder/get_latest_cursor</c>, WITHOUT enumerating any
+        /// entries. A later <see cref="ListFolderContinueRawAsync"/> from this cursor
+        /// yields everything that changed since this call. Because the call never
+        /// lists entries it returns in constant time and cannot wedge on a huge
+        /// subtree, making it the safe way to capture an account-wide sync anchor
+        /// before a long build.
+        /// </summary>
+        public virtual Task<string> GetLatestCursorAsync(string path, bool recursive = false, CancellationToken cancellationToken = default) =>
+            RetryAsync(_ => GetLatestCursorCoreAsync(path, recursive), cancellationToken);
+
+        private async Task<string> GetLatestCursorCoreAsync(string path, bool recursive)
+        {
+            var dbxPath = NormalizePath(path);
+            var result = await _client.Files.ListFolderGetLatestCursorAsync(dbxPath, recursive,
+                includeHasExplicitSharedMembers: true, includeMountedFolders: true);
+            return result.Cursor;
+        }
+
         public virtual Task<DropboxItem> GetMetadataAsync(string path, bool includeDeleted = false, CancellationToken cancellationToken = default) =>
             RetryAsync(_ => GetMetadataCoreAsync(path, includeDeleted), cancellationToken);
 

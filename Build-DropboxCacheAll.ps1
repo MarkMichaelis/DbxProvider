@@ -12,6 +12,16 @@
     in seconds (so progress is visible immediately), and each folder's pages are
     persisted to the cache database as they arrive.
 
+    This is the single command for keeping the cache current:
+
+      * First run (empty/incomplete cache): captures the account-wide Dropbox
+        delta cursor up front, then builds every top-level folder.
+      * Subsequent runs: completed folders are instant no-ops, then changes since
+        the captured cursor are drained in (incremental refresh) -- so you do NOT
+        rebuild millions of files just to pick up a handful of changes.
+      * -Rebuild: wipe the cache and the cursor and rebuild from scratch,
+        recapturing a fresh cursor.
+
     Build-DropboxCache is itself resumable -- it records a per-folder cursor in
     the cache's build_progress table -- so re-running this script after an
     interruption (Ctrl+C, crash, reboot) continues where it left off instead of
@@ -33,6 +43,11 @@
 .PARAMETER IncludeRevisions
     Also cache each file's revision history (much slower; off by default).
 
+.PARAMETER Rebuild
+    Wipe the entire cache (entries, build progress) and the saved delta cursor,
+    then rebuild from scratch with a freshly captured cursor. Without this switch
+    the script resumes/refreshes the existing cache.
+
 .PARAMETER BigFoldersLast
     Names of large top-level folders to build last. Defaults to the Synology
     backup archives and the .sync control folder.
@@ -44,11 +59,16 @@
 .EXAMPLE
     ./Build-DropboxCacheAll.ps1
     Build the whole account, normal folders first, big archives last. Re-run to
-    resume after any interruption.
+    resume after any interruption, or to refresh the cache with the latest
+    Dropbox changes once the build is complete.
 
 .EXAMPLE
     ./Build-DropboxCacheAll.ps1 -IncludeRevisions
     Also cache revision history for every file.
+
+.EXAMPLE
+    ./Build-DropboxCacheAll.ps1 -Rebuild
+    Discard the existing cache and cursor and rebuild from scratch.
 
 .NOTES
     After the cache is built, a complete zero-byte "conflicted copy" inventory
@@ -61,6 +81,7 @@ param(
     [string]$DriveName = 'Dbx',
     [string]$ModulePath = (Join-Path $PSScriptRoot 'src\DbxProvider\bin\Debug\net8.0\DbxProvider.psd1'),
     [switch]$IncludeRevisions,
+    [switch]$Rebuild,
     [string[]]$BigFoldersLast = @('.sync', 'ActiveBackupForGSuite', 'ActiveBackupForGoogleWorkspace', 'ActiveBackupForOffice365'),
     [string]$LogPath = (Join-Path $env:USERPROFILE 'Build-DropboxCacheAll.log')
 )
@@ -104,7 +125,10 @@ foreach ($name in $ordered) {
     $path = '/' + $name
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     try {
-        $r = Build-DropboxCache -Path $path -DriveName $DriveName -IncludeRevisions:$IncludeRevisions -ErrorAction Stop
+        # On a rebuild, the first folder build wipes the cache + cursor and
+        # recaptures a fresh anchor; the rest build normally on top of it.
+        $rebuildThis = [bool]$Rebuild -and ($i -eq 1)
+        $r = Build-DropboxCache -Path $path -DriveName $DriveName -IncludeRevisions:$IncludeRevisions -Rebuild:$rebuildThis -ErrorAction Stop
         $sw.Stop()
         $grandItems += $r.ItemsFound
         $grandFolders += $r.FoldersCached
@@ -118,6 +142,24 @@ foreach ($name in $ordered) {
     }
 }
 
-Write-Log ("=== FINISHED: {0} folders cached, {1} items across {2} top-level trees ===" -f `
+Write-Log ("=== FINISHED building: {0} folders cached, {1} items across {2} top-level trees ===" -f `
         $grandFolders, $grandItems, $ordered.Count)
+
+# Refresh phase: drain account-wide changes since the captured delta cursor into
+# the cache. On the first ever run this picks up anything that changed during the
+# (possibly multi-hour) build; on later runs it is the whole point -- a cheap
+# incremental update instead of a full rebuild.
+try {
+    Write-Log 'Refreshing cache with Dropbox changes since the captured cursor...'
+    $refresh = Build-DropboxCache -DriveName $DriveName -Refresh -ErrorAction Stop
+    Write-Log ('Refresh: {0} delta page(s), {1} added, {2} removed.' -f `
+            $refresh.DeltaPages, $refresh.ItemsAdded, $refresh.ItemsRemoved)
+    if ($refresh.ResetRequired) {
+        Write-Log 'Dropbox rejected the saved cursor; re-run with -Rebuild for a clean baseline.'
+    }
+}
+catch {
+    Write-Log ('Refresh FAILED -- {0}' -f ($_.Exception.Message -replace '\s+', ' '))
+}
+
 Write-Host "Cache database: $(Get-DropboxCacheDatabasePath)" -ForegroundColor Green
