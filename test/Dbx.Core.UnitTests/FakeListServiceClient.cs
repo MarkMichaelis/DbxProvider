@@ -46,6 +46,13 @@ internal sealed class FakeListServiceClient : DropboxServiceClient
     /// interrupted build.</summary>
     public int? ThrowOnContinueCall { get; set; }
 
+    /// <summary>Normalized folder paths whose recursive first-page listing never
+    /// returns (it completes only when its cancellation token fires). Used to
+    /// simulate a "wedged" subtree so tests can exercise the descend-on-wedge
+    /// fallback in <see cref="MetadataCache.BuildAsync"/>.</summary>
+    public HashSet<string> HangRecursiveListFor { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Revisions returned per file path (normalized or raw).</summary>
     public Dictionary<string, List<DropboxRevision>> RevisionsByPath { get; } =
         new(StringComparer.OrdinalIgnoreCase);
@@ -108,10 +115,21 @@ internal sealed class FakeListServiceClient : DropboxServiceClient
     {
         FirstPageCalls++;
         var norm = NormalizePath(path);
-        var all = Recursive(norm);
-        var take = Math.Min(PageSize, all.Count);
         LastIncludeMediaInfo = includeMediaInfo;
         LastIncludeHasExplicitSharedMembers = includeHasExplicitSharedMembers;
+
+        if (HangRecursiveListFor.Contains(norm))
+        {
+            // Simulate a wedge: never return a page until the call is cancelled.
+            var hung = new TaskCompletionSource<ListFolderPage>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            cancellationToken.Register(() => hung.TrySetException(
+                new OperationCanceledException(cancellationToken)));
+            return hung.Task;
+        }
+
+        var all = Recursive(norm);
+        var take = Math.Min(PageSize, all.Count);
         var page = new ListFolderPage { Cursor = MakeCursor(norm, take), HasMore = take < all.Count };
         page.Items.AddRange(all.Take(take));
         return Task.FromResult(page);

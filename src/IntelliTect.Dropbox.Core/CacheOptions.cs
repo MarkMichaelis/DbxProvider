@@ -27,6 +27,18 @@ namespace IntelliTect.Dropbox
         /// <summary>Background disk-flush cadence. Set to 0 to disable.</summary>
         public int FlushIntervalSeconds { get; set; } = 5;
 
+        /// <summary>
+        /// Maximum seconds a single recursive <c>list_folder</c> page call may
+        /// run during <see cref="MetadataCache.BuildAsync"/> before it is treated
+        /// as a wedge. On a very large account a recursive listing of an enormous
+        /// subtree can hang without ever returning its first page; when that
+        /// happens the build cancels the stalled call and falls back to listing
+        /// that folder one level at a time (a bounded call that cannot wedge),
+        /// then recurses into each subfolder. Set to 0 to disable the bound and
+        /// await every call indefinitely.
+        /// </summary>
+        public double BuildWedgeTimeoutSeconds { get; set; } = 90;
+
         /// <summary>Override the on-disk cache root. The single per-account
         /// database file (named from the account email) is placed directly in
         /// this directory.</summary>
