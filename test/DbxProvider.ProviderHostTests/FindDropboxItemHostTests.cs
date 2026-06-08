@@ -112,6 +112,22 @@ $ExecutionContext.SessionState.Drive.New($dbx, 'global') | Out-Null
     }
 
     [Fact]
+    public void FindDropboxItem_EmptyName_BehavesLikeStar_MatchesEverything()
+    {
+        var fake = new FakeDropboxServiceClient(Tree());
+        using var ps = NewHost(fake);
+        // A computed-but-empty -Name must mean "no filter" (same as '*'), not an
+        // empty literal that matches only empty filenames.
+        ps.AddScript(SetupAndBuild + "Find-DropboxItem -Name ''");
+        var results = ps.Invoke();
+
+        Assert.False(ps.HadErrors, Errors(ps));
+        Assert.Equal(
+            new[] { "/A", "/A/B", "/A/B/alpha.md", "/A/alpha.txt", "/A/beta.log" },
+            Paths(results));
+    }
+
+    [Fact]
     public void FindDropboxItem_NoSyncCursor_CapturesBaseline_WithoutDraining()
     {
         // No Build -> the cache is empty and has never captured a sync cursor.

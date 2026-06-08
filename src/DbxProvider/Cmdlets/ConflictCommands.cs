@@ -49,6 +49,16 @@ namespace DbxProvider.Cmdlets
 
             MigrateLegacyStateIfPresent(startPath);
 
+            if (cache.PersistedCount() == 0)
+            {
+                // Match Find-DropboxItem: an empty cache looks like "no conflicts"
+                // when the real issue is the cache was never built. Say so.
+                WriteWarning(
+                    "The metadata cache is empty. Run Build-DropboxCacheAll.ps1 (or " +
+                    "Build-DropboxCache) to populate it before scanning for conflicts.");
+                return;
+            }
+
             // Conflict matches are always files (never folders), preserving the
             // original files-only semantics that make the result safe to delete.
             var namePredicate = FindDropboxItemCommand.BuildNamePredicate(

@@ -64,6 +64,9 @@ namespace IntelliTect.Dropbox
                 {
                     return null;
                 }
+                // A JSON "Matches": null would null out the property; normalize it
+                // so callers can read Matches.Count without a null check.
+                state.Matches ??= new Dictionary<string, ConflictMatch>(StringComparer.Ordinal);
                 return state;
             }
             catch (JsonException) { return null; }

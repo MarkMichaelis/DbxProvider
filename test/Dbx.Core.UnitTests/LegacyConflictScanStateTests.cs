@@ -62,4 +62,17 @@ public sealed class LegacyConflictScanStateTests
         LegacyConflictScanState.FromJson(@"{ ""Cursor"": ""cursor-abc"" }")
             .Should().BeNull();
     }
+
+    [Fact]
+    public void FromJson_MatchesNull_IsNormalizedToEmptyDictionary()
+    {
+        // "Matches": null would otherwise null out the property and make a
+        // migrating caller's Matches.Count throw.
+        var state = LegacyConflictScanState.FromJson(
+            @"{ ""AccountId"": ""acct-123"", ""Cursor"": ""cursor-abc"", ""Matches"": null }");
+
+        state.Should().NotBeNull();
+        state!.Matches.Should().NotBeNull();
+        state.Matches.Count.Should().Be(0);
+    }
 }

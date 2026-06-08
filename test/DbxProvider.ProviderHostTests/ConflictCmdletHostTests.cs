@@ -28,7 +28,7 @@ public class ConflictCmdletHostTests : IDisposable
         catch { /* best effort */ }
     }
 
-    private const string SetupAndBuild = @"
+    private const string Setup = @"
 $ErrorActionPreference = 'Stop'
 $VerbosePreference = 'Continue'
 Import-Module $dllPath
@@ -39,8 +39,9 @@ $opts = [IntelliTect.Dropbox.CacheOptions]::new()
 $opts.RootDirectoryOverride = $cacheDir
 $dbx.InitializeCache('fake-account', 'fake@example.com', $opts)
 $ExecutionContext.SessionState.Drive.New($dbx, 'global') | Out-Null
-Build-DropboxCache -Path '/' | Out-Null
 ";
+
+    private const string SetupAndBuild = Setup + "Build-DropboxCache -Path '/' | Out-Null\n";
 
     private PowerShell NewHost(FakeDropboxServiceClient fake, string statePath = "")
     {
@@ -213,5 +214,30 @@ $matches = @(Find-DropboxConflict -StatePath $statePath)
         Assert.True(File.Exists(statePath), "non-legacy file must be left in place");
         Assert.Equal(foreignJson, File.ReadAllText(statePath));
         Assert.False(File.Exists(statePath + ".bak"), "non-legacy file must not be archived");
+    }
+
+    [Fact]
+    public void FindDropboxConflict_EmptyCache_WarnsToBuild()
+    {
+        // A drive whose cache was never built: there are no persisted entries, so
+        // "no conflicts" would be misleading -- the cmdlet should say the cache is
+        // empty instead, matching Find-DropboxItem.
+        var fake = new FakeDropboxServiceClient(new List<DropboxItem>
+        {
+            new() { Name = "A", Path = "/A", IsFolder = true },
+        });
+
+        using var ps = NewHost(fake);
+        ps.AddScript(Setup + @"
+$matches = @(Find-DropboxConflict)
+[pscustomobject]@{ Count = $matches.Count }
+");
+        var results = ps.Invoke();
+
+        Assert.False(ps.HadErrors, Errors(ps));
+        Assert.Equal(0, (int)results.Single().Properties["Count"].Value);
+
+        var warnings = string.Join("\n", ps.Streams.Warning.Select(w => w.Message));
+        Assert.Contains("metadata cache is empty", warnings);
     }
 }
