@@ -29,6 +29,8 @@
         'Get-DropboxCacheDatabasePath',
         # Search
         'Search-Dropbox',        # Revisions
+        # Find (cache-backed)
+        'Find-DropboxItem',
         # Conflict scan
         'Find-DropboxConflict',        # Revisions
         'Get-DropboxRevision',

@@ -21,6 +21,7 @@ public class FakeDropboxServiceClient : DropboxServiceClient
     private readonly Queue<ListFolderDelta> _scriptedDeltas = new();
     private int _fullListCalls;
     private int _continueCalls;
+    private int _getLatestCursorCalls;
     private string _fullCursor = "cursor-full-0";
 
     /// <summary>Records every <see cref="UploadAsync"/> call in order, capturing
@@ -49,11 +50,24 @@ public class FakeDropboxServiceClient : DropboxServiceClient
     /// <summary>Number of times the /list_folder/continue delta path was invoked.</summary>
     public int ContinueCalls => _continueCalls;
 
+    /// <summary>Number of times the get_latest_cursor path was invoked (sync-cursor capture).</summary>
+    public int GetLatestCursorCalls => _getLatestCursorCalls;
+
+    /// <summary>Scripted deltas returned, in order, by continue calls whose cursor
+    /// is a sync cursor (one produced by <see cref="GetLatestCursorAsync"/>). Each
+    /// dequeued delta simulates one page of account-wide changes; when the queue is
+    /// empty a terminal empty delta is returned. Separate from <c>_scriptedDeltas</c>
+    /// so account-sync drains and per-folder delta scripting never collide.</summary>
+    public Queue<ListFolderDelta> SyncDeltas { get; } = new();
+
     /// <summary>Sets the cursor the next full recursive listing returns.</summary>
     public void SetFullCursor(string cursor) => _fullCursor = cursor;
 
     /// <summary>Queues a delta to be returned by the next continue call (FIFO).</summary>
     public void EnqueueDelta(ListFolderDelta delta) => _scriptedDeltas.Enqueue(delta);
+
+    /// <summary>Queues a delta to be returned by the next account-sync drain (FIFO).</summary>
+    public void EnqueueSyncDelta(ListFolderDelta delta) => SyncDeltas.Enqueue(delta);
 
     private static bool IsUnder(string itemPath, string normalizedRoot) =>
         normalizedRoot.Length == 0
@@ -74,9 +88,26 @@ public class FakeDropboxServiceClient : DropboxServiceClient
     public override Task<ListFolderDelta> ListFolderContinueRawAsync(string cursor, CancellationToken cancellationToken = default)
     {
         System.Threading.Interlocked.Increment(ref _continueCalls);
+
+        // Account-wide sync drain: cursors minted by GetLatestCursorAsync.
+        if (cursor.StartsWith("sync::", System.StringComparison.Ordinal))
+        {
+            return Task.FromResult(SyncDeltas.Count > 0
+                ? SyncDeltas.Dequeue()
+                : new ListFolderDelta { NewCursor = cursor, HasMore = false });
+        }
+
         if (_scriptedDeltas.Count == 0)
             return Task.FromResult(new ListFolderDelta { NewCursor = cursor, HasMore = false });
         return Task.FromResult(_scriptedDeltas.Dequeue());
+    }
+
+    /// <summary>Mints a fresh account-wide sync cursor (<c>sync::N</c>) and counts
+    /// the call so tests can prove a baseline cursor was captured exactly once.</summary>
+    public override Task<string> GetLatestCursorAsync(string path, bool recursive = false, CancellationToken cancellationToken = default)
+    {
+        System.Threading.Interlocked.Increment(ref _getLatestCursorCalls);
+        return Task.FromResult($"sync::{_getLatestCursorCalls}");
     }
 
     /// <summary>Revision history returned by <see cref="ListRevisionsAsync"/>, keyed

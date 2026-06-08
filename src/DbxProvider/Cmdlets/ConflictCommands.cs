@@ -9,12 +9,14 @@ using IntelliTect.Dropbox;
 namespace DbxProvider.Cmdlets
 {
     /// <summary>
-    /// Scans a Dropbox subtree for zero-byte (or, with -IncludeNonZero, all)
-    /// "conflicted copy" files. The first run does a full recursive
-    /// enumeration and persists the resulting cursor and match set to a JSON
-    /// sidecar file; later runs fetch only the delta since that cursor,
-    /// transparently falling back to a full pass when the cursor is rejected
-    /// or any scan parameter changes. Pass -Full to force a full pass.
+    /// Finds zero-byte (or, with -IncludeNonZero, all) "conflicted copy" files
+    /// under a Dropbox subtree by reading the local metadata cache -- no recursive
+    /// Dropbox enumeration. The cache is auto-refreshed from the account delta
+    /// cursor first (the shared GetRefreshedCache), so results reflect changes
+    /// since the last sync. This delegates to the same cache finder as
+    /// Find-DropboxItem, fixing the hard-coded conflict pattern and the zero-byte
+    /// filter. Build or refresh the cache with Build-DropboxCacheAll.ps1. A legacy
+    /// *.state.json sidecar from an earlier version is archived to .bak on sight.
     /// </summary>
     [Cmdlet(VerbsCommon.Find, "DropboxConflict")]
     [OutputType(typeof(ConflictMatch))]
@@ -32,56 +34,77 @@ namespace DbxProvider.Cmdlets
         [Parameter]
         public SwitchParameter IncludeNonZero { get; set; }
 
-        /// <summary>Path to the JSON sidecar state file. Defaults to a per-account/path/pattern file under the temp folder.</summary>
+        /// <summary>Path to a legacy <c>*.state.json</c> sidecar to migrate. When
+        /// omitted, the obsolete per-account default location is checked. Any such
+        /// sidecar is archived to <c>.bak</c>; conflict finding itself is
+        /// cache-backed and needs no sidecar.</summary>
         [Parameter]
         public string? StatePath { get; set; }
 
-        /// <summary>Ignore any saved state and force a full recursive enumeration.</summary>
-        [Parameter]
-        public SwitchParameter Full { get; set; }
-
-        /// <summary>Runs the scan, persists updated state, and emits each match.</summary>
+        /// <summary>Reads conflicts from the auto-refreshed cache and emits each match.</summary>
         protected override void ProcessRecord()
         {
-            var service = GetService();
             var startPath = StripDrivePrefix(Path);
-            var parameters = new ConflictScanParameters
+            var cache = GetRefreshedCache();
+
+            MigrateLegacyStateIfPresent(startPath);
+
+            // Conflict matches are always files (never folders), preserving the
+            // original files-only semantics that make the result safe to delete.
+            var namePredicate = FindDropboxItemCommand.BuildNamePredicate(
+                Pattern, zeroByteOnly: !IncludeNonZero.IsPresent);
+            var matches = cache.FindItems(
+                item => !item.IsFolder && namePredicate(item), startPath);
+
+            WriteVerbose($"Found {matches.Count} conflict match(es) from the metadata cache.");
+
+            foreach (var item in matches.OrderBy(m => m.Path, StringComparer.OrdinalIgnoreCase))
+                WriteObject(new ConflictMatch { Path = item.Path, Bytes = item.Length });
+        }
+
+        /// <summary>Detects and archives an obsolete conflict-scan sidecar (the
+        /// pre-cache persisted state) so an upgraded user neither errors nor
+        /// silently loses their saved matches. The sidecar is moved to a unique
+        /// <c>.bak</c>; the cache is now authoritative.</summary>
+        private void MigrateLegacyStateIfPresent(string startPath)
+        {
+            var candidate = !string.IsNullOrWhiteSpace(StatePath)
+                ? StatePath!
+                : LegacyDefaultStatePath(startPath);
+
+            try
             {
-                StartPath = startPath,
-                Pattern = Pattern,
-                IncludeNonZero = IncludeNonZero.IsPresent,
-            };
+                if (!File.Exists(candidate)) return;
+                var legacy = LegacyConflictScanState.FromJson(File.ReadAllText(candidate));
+                if (legacy == null) return; // not a legacy sidecar -- leave it untouched
 
-            var statePath = ResolveStatePath(startPath, parameters);
-            var previousState = Full.IsPresent ? null : LoadState(statePath);
-
-            var scanner = new ConflictScanner(service);
-            var result = Run(ct => scanner.ScanAsync(parameters, previousState, ct));
-
-            SaveState(statePath, result.State);
-
-            WriteVerbose(result.WasFullScan
-                ? $"Full recursive scan complete: {result.Matches.Count} match(es). State saved to '{statePath}'."
-                : $"Incremental scan complete: {result.Matches.Count} match(es). State saved to '{statePath}'.");
-
-            foreach (var match in result.Matches.OrderBy(m => m.Path, StringComparer.OrdinalIgnoreCase))
-                WriteObject(match);
+                var archive = UniqueBackupPath(candidate);
+                File.Move(candidate, archive);
+                WriteWarning(
+                    $"Found an obsolete conflict-scan sidecar '{candidate}' " +
+                    $"({legacy.Matches.Count} saved match(es)). Conflict finding is now backed by the " +
+                    $"metadata cache, so the sidecar was archived to '{archive}'. Build or refresh the " +
+                    $"cache with Build-DropboxCacheAll.ps1.");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                WriteWarning($"Could not migrate legacy scan state '{candidate}': {ex.Message}.");
+            }
         }
 
-        private static string StripDrivePrefix(string path)
+        private string LegacyDefaultStatePath(string startPath)
         {
-            if (string.IsNullOrEmpty(path)) return string.Empty;
-            int colon = path.IndexOf(':');
-            return colon >= 0 ? path.Substring(colon + 1) : path;
-        }
-
-        private string ResolveStatePath(string startPath, ConflictScanParameters parameters)
-        {
-            if (!string.IsNullOrWhiteSpace(StatePath)) return StatePath!;
-            var key = $"{DriveName}|{DropboxServiceClient.NormalizePath(startPath)}|{parameters.Pattern}|{parameters.IncludeNonZero}";
-            var hash = ShortHash(key);
+            var key = $"{DriveName}|{DropboxServiceClient.NormalizePath(startPath)}|{Pattern}|{IncludeNonZero.IsPresent}";
             var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "DbxProvider");
-            return System.IO.Path.Combine(dir, $"conflict-scan-{hash}.json");
+            return System.IO.Path.Combine(dir, $"conflict-scan-{ShortHash(key)}.json");
+        }
+
+        private static string UniqueBackupPath(string path)
+        {
+            var bak = path + ".bak";
+            int n = 1;
+            while (File.Exists(bak)) bak = $"{path}.bak{n++}";
+            return bak;
         }
 
         private static string ShortHash(string value)
@@ -91,27 +114,6 @@ namespace DbxProvider.Cmdlets
             var sb = new StringBuilder(16);
             for (int i = 0; i < 8; i++) sb.Append(bytes[i].ToString("x2"));
             return sb.ToString();
-        }
-
-        private ConflictScanState? LoadState(string statePath)
-        {
-            try
-            {
-                if (!File.Exists(statePath)) return null;
-                return ConflictScanState.FromJson(File.ReadAllText(statePath));
-            }
-            catch (IOException ex)
-            {
-                WriteWarning($"Could not read scan state '{statePath}': {ex.Message}. Doing a full scan.");
-                return null;
-            }
-        }
-
-        private void SaveState(string statePath, ConflictScanState state)
-        {
-            var dir = System.IO.Path.GetDirectoryName(statePath);
-            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            File.WriteAllText(statePath, state.ToJson(), new UTF8Encoding(false));
         }
     }
 }

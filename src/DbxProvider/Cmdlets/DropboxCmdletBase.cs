@@ -69,6 +69,70 @@ namespace DbxProvider.Cmdlets
                 $"Drive '{DriveName}:' is not a Dropbox drive. Use Connect-Dropbox first.");
         }
 
+        /// <summary>Strips a drive qualifier (e.g. <c>Dbx:</c>) from a path,
+        /// leaving the Dropbox-relative path. Shared by the cache finders.</summary>
+        protected static string StripDrivePrefix(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return string.Empty;
+            int colon = path.IndexOf(':');
+            return colon >= 0 ? path.Substring(colon + 1) : path;
+        }
+
+        private const int RefreshProgressId = 1900;
+
+        /// <summary>
+        /// Returns the drive's metadata cache after bringing it up to date from
+        /// the account delta cursor -- the shared, cross-cutting refresh every
+        /// cache-backed cmdlet runs before reading. While draining it shows a
+        /// transient <see cref="Cmdlet.WriteProgress(ProgressRecord)"/> bar (so it
+        /// auto-clears) and, on completion, reports the added/removed counts. When
+        /// the cache has never captured a sync cursor (an older cache) it captures
+        /// a baseline and skips the drain; when Dropbox rejects the cursor it warns
+        /// the user to rebuild. Honors Ctrl+C via <see cref="Run(Func{CancellationToken, Task})"/>.
+        /// </summary>
+        protected MetadataCache GetRefreshedCache()
+        {
+            // Wire the rate-limit notifier so throttling during the drain surfaces
+            // as warnings on the pipeline thread.
+            GetService();
+            var cache = CacheCmdletHelpers.GetCache(this, DriveName);
+            if (!cache.Options.Enabled) return cache;
+
+            if (cache.GetSyncState() == null)
+            {
+                // Older cache with no delta anchor: capture a baseline now so the
+                // next read can drain, but do not enumerate this time.
+                Run(ct => cache.EnsureSyncCursorAsync(ct));
+                WriteVerbose(
+                    "No delta cursor was present; captured a baseline for future incremental " +
+                    "refreshes.");
+                return cache;
+            }
+
+            var progress = new ProgressRecord(RefreshProgressId,
+                "Refreshing Dropbox metadata cache", "Draining changes since the last sync...");
+            WriteProgress(progress);
+
+            var sync = Run(ct => cache.SyncAsync(ct));
+
+            if (sync.ResetRequired)
+            {
+                progress.RecordType = ProgressRecordType.Completed;
+                WriteProgress(progress);
+                WriteWarning(
+                    "Dropbox rejected the saved delta cursor, so the cache could not be refreshed " +
+                    "incrementally. Run 'Build-DropboxCacheAll.ps1 -Rebuild' for a clean baseline.");
+                return cache;
+            }
+
+            var summary = $"Refreshed cache: {sync.Added} added, {sync.Removed} removed.";
+            progress.StatusDescription = summary;
+            progress.RecordType = ProgressRecordType.Completed;
+            WriteProgress(progress);
+            WriteVerbose(summary);
+            return cache;
+        }
+
         /// <summary>
         /// Runs an async Dropbox call from synchronous cmdlet code while
         /// pumping queued <c>WriteWarning</c>/<c>WriteVerbose</c> messages
