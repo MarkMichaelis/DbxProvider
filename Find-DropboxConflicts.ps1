@@ -79,6 +79,28 @@ param(
     [switch]$Delete
 )
 
+function Resolve-DbxDriveName {
+    # Returns the PowerShell drive name from a path's LEADING drive qualifier
+    # (e.g. 'Dbx:\Folder' -> 'Dbx'). A pure Dropbox path such as '/A/B', or a
+    # colon that appears after a path separator (e.g. '/Project:Notes'), has no
+    # qualifier, so the default 'Dbx' drive is returned. Mirrors the provider's
+    # StripDrivePrefix so -Path and -DriveName stay consistent.
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Path)
+
+    $colon = $Path.IndexOf(':')
+    if ($colon -gt 0) {
+        $separator = $Path.IndexOfAny([char[]]('/', '\'))
+        if ($separator -lt 0 -or $separator -gt $colon) {
+            return $Path.Substring(0, $colon)
+        }
+    }
+    return 'Dbx'
+}
+
+# When dot-sourced (e.g. by Pester) load the helpers above but skip execution.
+if ($MyInvocation.InvocationName -eq '.') { return }
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -90,10 +112,10 @@ if (-not (Get-Module DbxProvider)) {
     Import-Module $ModulePath -ErrorAction Stop
 }
 
-$driveName = ($StartPath -split ':', 2)[0]
+$driveName = Resolve-DbxDriveName -Path $StartPath
 if (-not (Get-PSDrive -Name $driveName -ErrorAction SilentlyContinue)) {
     Write-Host "Connecting to Dropbox (drive '$driveName' not mounted)..." -ForegroundColor Cyan
-    Connect-Dropbox | Out-Null
+    Connect-Dropbox -DriveName $driveName | Out-Null
 }
 
 # --- Cache-backed scan via the provider cmdlet -----------------------------
