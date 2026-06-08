@@ -180,4 +180,38 @@ $matches = @(Find-DropboxConflict -StatePath $statePath)
         Assert.True(File.Exists(statePath + ".bak"), "legacy sidecar should be archived to .bak");
         Assert.Contains("legacy", File.ReadAllText(statePath + ".bak"));
     }
+
+    [Fact]
+    public void FindDropboxConflict_NonLegacyStateFile_IsLeftUntouched()
+    {
+        var fake = new FakeDropboxServiceClient(new List<DropboxItem>
+        {
+            new() { Name = "A", Path = "/A", IsFolder = true },
+            new() { Name = "d's conflicted copy.txt", Path = "/A/d's conflicted copy.txt", IsFolder = false, Length = 0 },
+        });
+
+        // A JSON file that is NOT a legacy sidecar (no AccountId/Cursor). It must
+        // be left exactly where it is -- never mistaken for legacy state and
+        // archived just because it happens to be valid JSON.
+        var statePath = Path.Combine(_cacheDir, "not-a-sidecar.json");
+        Directory.CreateDirectory(_cacheDir);
+        const string foreignJson = @"{ ""note"": ""this is not a conflict-scan sidecar"" }";
+        File.WriteAllText(statePath, foreignJson);
+
+        using var ps = NewHost(fake, statePath);
+        ps.AddScript(SetupAndBuild + @"
+$matches = @(Find-DropboxConflict -StatePath $statePath)
+[pscustomobject]@{ Count = $matches.Count }
+");
+        var results = ps.Invoke();
+
+        Assert.False(ps.HadErrors, Errors(ps));
+        // The conflict in the cache is still found -- the cmdlet proceeds normally.
+        Assert.Equal(1, (int)results.Single().Properties["Count"].Value);
+
+        // The foreign file is untouched: still present, unchanged, and no .bak.
+        Assert.True(File.Exists(statePath), "non-legacy file must be left in place");
+        Assert.Equal(foreignJson, File.ReadAllText(statePath));
+        Assert.False(File.Exists(statePath + ".bak"), "non-legacy file must not be archived");
+    }
 }

@@ -113,12 +113,22 @@ namespace DbxProvider.Cmdlets
                 "Refreshing Dropbox metadata cache", "Draining changes since the last sync...");
             WriteProgress(progress);
 
-            var sync = Run(ct => cache.SyncAsync(ct));
+            MetadataCache.SyncResult sync;
+            try
+            {
+                sync = Run(ct => cache.SyncAsync(ct));
+            }
+            finally
+            {
+                // Always clear the transient progress bar -- even if the drain
+                // throws (network or SQLite error) -- so the host is never left
+                // with a stuck "Refreshing..." indicator.
+                progress.RecordType = ProgressRecordType.Completed;
+                WriteProgress(progress);
+            }
 
             if (sync.ResetRequired)
             {
-                progress.RecordType = ProgressRecordType.Completed;
-                WriteProgress(progress);
                 WriteWarning(
                     "Dropbox rejected the saved delta cursor, so the cache could not be refreshed " +
                     "incrementally. Run 'Build-DropboxCacheAll.ps1 -Rebuild' for a clean baseline.");
@@ -126,9 +136,6 @@ namespace DbxProvider.Cmdlets
             }
 
             var summary = $"Refreshed cache: {sync.Added} added, {sync.Removed} removed.";
-            progress.StatusDescription = summary;
-            progress.RecordType = ProgressRecordType.Completed;
-            WriteProgress(progress);
             WriteVerbose(summary);
             return cache;
         }
