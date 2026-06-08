@@ -305,54 +305,138 @@ namespace IntelliTect.Dropbox
         {
             if (!_options.Enabled) return new BuildResult();
 
-            var state = new BuildState(DropboxServiceClient.NormalizePath(path));
-            var saved = LoadBuildProgress(state.RootKey);
-            if (saved is { Complete: false } && saved.Cursor.Length > 0)
-                await ContinueBuildAsync(state, saved.Cursor, cancellationToken);
-            else
-                await FreshBuildAsync(state, cancellationToken);
-
+            var result = new BuildResult();
+            await BuildSubtreeAsync(DropboxServiceClient.NormalizePath(path), result, cancellationToken);
             EvictIfOverBudget();
-            return new BuildResult
+            return result;
+        }
+
+        /// <summary>Builds one subtree via a single recursive listing, falling
+        /// back to per-subfolder descent when that listing wedges (never returns
+        /// a page within the configured wedge timeout). The fallback lists the
+        /// folder one level at a time -- a bounded call that cannot wedge -- and
+        /// recurses into each subfolder, so a huge folder nested at any depth is
+        /// handled and the walk always terminates.</summary>
+        private async Task BuildSubtreeAsync(string rootPath, BuildResult result, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var state = new BuildState(rootPath);
+            var saved = LoadBuildProgress(state.RootKey);
+            if (saved is { Complete: true }) return;
+
+            var completed = saved is { Complete: false } && saved.Cursor.Length > 0
+                ? await ContinueBuildAsync(state, saved.Cursor, ct)
+                : await FreshBuildAsync(state, ct);
+
+            result.FoldersCached += state.Folders.Count;
+            result.ItemsFound += state.ItemsFound;
+            if (completed) return;
+
+            // The recursive listing wedged: cache this folder's direct children
+            // with a bounded non-recursive listing, then recurse into each
+            // subfolder using the same adaptive strategy.
+            var children = await ListAndCacheDirectChildrenAsync(rootPath, ct);
+            foreach (var child in children)
             {
-                FoldersCached = state.Folders.Count,
-                ItemsFound = state.ItemsFound
-            };
+                if (child.IsFolder)
+                    await BuildSubtreeAsync(DropboxServiceClient.NormalizePath(child.Path), result, ct);
+            }
+
+            SaveBuildProgress(state.RootKey, cursor: string.Empty, complete: true);
         }
 
         /// <summary>Starts a build from the first page of a recursive listing,
-        /// requesting enriched metadata at no extra request cost.</summary>
-        private async Task FreshBuildAsync(BuildState state, CancellationToken ct)
+        /// requesting enriched metadata at no extra request cost. Returns
+        /// <c>true</c> when the subtree was fully listed, or <c>false</c> when a
+        /// listing call wedged and the caller should descend instead.</summary>
+        private async Task<bool> FreshBuildAsync(BuildState state, CancellationToken ct)
         {
             GetOrCreateBuildEntry(state.RootKey, state.RootPath);
             SaveBuildProgress(state.RootKey, cursor: "", complete: false);
 
-            var page = await _service.ListFolderFirstPageAsync(state.RootPath, recursive: true,
-                includeMediaInfo: true, includeHasExplicitSharedMembers: true,
-                cancellationToken: ct);
+            var page = await RunBoundedAsync(c => _service.ListFolderFirstPageAsync(state.RootPath,
+                recursive: true, includeMediaInfo: true, includeHasExplicitSharedMembers: true,
+                cancellationToken: c), ct);
+            if (page is null) return false;
 
             ProcessPage(state, page.Items, page.Cursor, complete: !page.HasMore);
-            if (page.HasMore) await ContinueBuildAsync(state, page.Cursor, ct);
+            if (!page.HasMore) return true;
+            return await ContinueBuildAsync(state, page.Cursor, ct);
         }
 
         /// <summary>Continues a build from a saved cursor, restarting cleanly when
-        /// Dropbox signals that the cursor is no longer valid.</summary>
-        private async Task ContinueBuildAsync(BuildState state, string cursor, CancellationToken ct)
+        /// Dropbox signals that the cursor is no longer valid. Returns <c>true</c>
+        /// when the subtree was fully listed, or <c>false</c> when a continue call
+        /// wedged and the caller should descend instead.</summary>
+        private async Task<bool> ContinueBuildAsync(BuildState state, string cursor, CancellationToken ct)
         {
             while (true)
             {
                 ct.ThrowIfCancellationRequested();
-                var delta = await _service.ListFolderContinueRawAsync(cursor, ct);
+                var delta = await RunBoundedAsync(c => _service.ListFolderContinueRawAsync(cursor, c), ct);
+                if (delta is null) return false;
                 if (delta.ResetRequired)
-                {
-                    await FreshBuildAsync(state, ct);
-                    return;
-                }
+                    return await FreshBuildAsync(state, ct);
 
                 ProcessPage(state, delta.AddsOrUpdates, delta.NewCursor, complete: !delta.HasMore);
                 cursor = delta.NewCursor;
-                if (!delta.HasMore) return;
+                if (!delta.HasMore) return true;
             }
+        }
+
+        /// <summary>Awaits a listing call but treats one that does not return
+        /// within <see cref="CacheOptions.BuildWedgeTimeoutSeconds"/> as a wedge:
+        /// it cancels the stalled call and returns <c>null</c> so the caller can
+        /// fall back to per-subfolder descent. A timeout of zero awaits directly.
+        /// Outer cancellation propagates as cancellation, not as a wedge.</summary>
+        private async Task<T?> RunBoundedAsync<T>(Func<CancellationToken, Task<T>> operation,
+            CancellationToken ct) where T : class
+        {
+            var seconds = _options.BuildWedgeTimeoutSeconds;
+            if (seconds <= 0) return await operation(ct);
+
+            using var operationCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var operationTask = operation(operationCts.Token);
+            var delayTask = Task.Delay(TimeSpan.FromSeconds(seconds), delayCts.Token);
+
+            if (await Task.WhenAny(operationTask, delayTask) == operationTask)
+            {
+                delayCts.Cancel();
+                return await operationTask;
+            }
+
+            ct.ThrowIfCancellationRequested();
+            operationCts.Cancel();
+            try { await operationTask; } catch { /* stalled call cancelled */ }
+            return null;
+        }
+
+        /// <summary>Lists a folder's immediate children with a bounded
+        /// non-recursive call and stores them as that folder's cache entry. Used
+        /// by the descend-on-wedge fallback; the listing is bounded by the
+        /// folder's direct child count and therefore cannot wedge.</summary>
+        private async Task<List<DropboxItem>> ListAndCacheDirectChildrenAsync(string rootPath,
+            CancellationToken ct)
+        {
+            var (items, cursor) = await _service.ListFolderWithCursorAsync(rootPath,
+                cancellationToken: ct);
+
+            var entry = GetOrCreateBuildEntry(MakeKey(rootPath), rootPath);
+            entry.Items = items.ToList();
+            entry.Cursor = cursor;
+            entry.LastValidatedUtc = DateTime.UtcNow;
+            entry.LastUsedUtc = DateTime.UtcNow;
+            entry.Dirty = true;
+            foreach (var item in items)
+            {
+                if (item.IsFolder)
+                    GetOrCreateBuildEntry(MakeKey(item.Path), item.Path);
+            }
+
+            Flush();
+            return items;
         }
 
         /// <summary>Merges one page into the in-memory entries and flushes the

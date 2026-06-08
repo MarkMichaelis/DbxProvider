@@ -150,6 +150,40 @@ public sealed class MetadataCacheBuildTests : IDisposable
     }
 
     [Fact]
+    public async Task BuildAsync_WedgedSubtree_DescendsPerSubfolderAndCachesEverything()
+    {
+        // Both the root and the nested folder /A wedge on their recursive
+        // listing. The build must descend one level at a time -- a bounded,
+        // non-recursive listing that cannot wedge -- until it reaches a subtree
+        // that lists successfully, caching the whole tree regardless of depth.
+        var service = new FakeListServiceClient(SampleTree());
+        service.HangRecursiveListFor.Add("");   // the account root "/"
+        service.HangRecursiveListFor.Add("/A"); // a large folder nested below it
+        var options = Opts();
+        options.BuildWedgeTimeoutSeconds = 0.3;
+        using var cache = new MetadataCache(service, "acct", "user@example.com", options);
+
+        var result = await cache.BuildAsync("/");
+
+        // It fell back to non-recursive descent for both wedged folders.
+        service.NonRecursiveListCalls.Should().BeGreaterThanOrEqualTo(2);
+
+        // Every folder and file is cached, exactly as a recursive build would.
+        cache.TryGet("/", out var root).Should().BeTrue();
+        root!.Items.Select(i => i.Path).Should().BeEquivalentTo(new[] { "/A" });
+
+        cache.TryGet("/A", out var a).Should().BeTrue();
+        a!.Items.Select(i => i.Path).Should().BeEquivalentTo(new[] { "/A/file2.txt", "/A/B" });
+
+        cache.TryGet("/A/B", out var b).Should().BeTrue();
+        b!.Items.Select(i => i.Path).Should().BeEquivalentTo(new[] { "/A/B/file.txt" });
+
+        // The wedged folders are recorded complete so a re-run skips them.
+        cache.IsBuildComplete("/").Should().BeTrue();
+        cache.IsBuildComplete("/A").Should().BeTrue();
+    }
+
+    [Fact]
     public async Task BuildRevisionsAsync_CachesRevisionsForEveryFileSkippingFolders()
     {
         var service = new FakeListServiceClient(SampleTree());
