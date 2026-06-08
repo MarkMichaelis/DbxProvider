@@ -28,6 +28,7 @@ namespace DbxProvider.Cmdlets
 
         /// <summary>Filename wildcard identifying a conflict file.</summary>
         [Parameter]
+        [SupportsWildcards()]
         public string Pattern { get; set; } = "*'s conflicted copy*";
 
         /// <summary>Also capture conflict files that are not zero bytes.</summary>
