@@ -26,45 +26,45 @@ AfterAll {
     Disconnect-DbxTestDrive
 }
 
-Describe 'Search-Dropbox' -Skip:(-not $HasCredentials) {
+Describe 'Search-Dropbox -NoCache (server index)' -Skip:(-not $HasCredentials) {
 
     It 'returns results for a unique token' {
-        $results = Search-Dropbox -Query $UniqueToken -Path $Folder.ApiPath -DriveName 'DbxTest' -MaxResults 25
+        $results = Search-Dropbox -Query $UniqueToken -Path $Folder.ApiPath -DriveName 'DbxTest' -NoCache -MaxResults 25
         # Indexing latency may yield 0 results; assert the call succeeds without throwing
         # and returns a (possibly empty) collection.
         ($results | Measure-Object).Count | Should -BeGreaterOrEqual 0
     }
 
     It 'accepts -MaxResults without error' {
-        { Search-Dropbox -Query $UniqueToken -Path $Folder.ApiPath -DriveName 'DbxTest' -MaxResults 5 } | Should -Not -Throw
+        { Search-Dropbox -Query $UniqueToken -Path $Folder.ApiPath -DriveName 'DbxTest' -NoCache -MaxResults 5 } | Should -Not -Throw
     }
 
     It 'accepts -FilenameOnly without error' {
-        { Search-Dropbox -Query $UniqueToken -Path $Folder.ApiPath -DriveName 'DbxTest' -FilenameOnly } | Should -Not -Throw
+        { Search-Dropbox -Query $UniqueToken -Path $Folder.ApiPath -DriveName 'DbxTest' -NoCache -FilenameOnly } | Should -Not -Throw
     }
 
     It 'accepts -FileExtensions without error' {
-        { Search-Dropbox -Query $UniqueToken -Path $Folder.ApiPath -DriveName 'DbxTest' -FileExtensions txt } | Should -Not -Throw
+        { Search-Dropbox -Query $UniqueToken -Path $Folder.ApiPath -DriveName 'DbxTest' -NoCache -FileExtensions txt } | Should -Not -Throw
     }
 
     It 'accepts -FileCategory without error' {
-        { Search-Dropbox -Query $UniqueToken -Path $Folder.ApiPath -DriveName 'DbxTest' -FileCategory Document } | Should -Not -Throw
+        { Search-Dropbox -Query $UniqueToken -Path $Folder.ApiPath -DriveName 'DbxTest' -NoCache -FileCategory Document } | Should -Not -Throw
     }
 
     It 'accepts -FileStatus Active without error' {
-        { Search-Dropbox -Query $UniqueToken -Path $Folder.ApiPath -DriveName 'DbxTest' -FileStatus Active } | Should -Not -Throw
+        { Search-Dropbox -Query $UniqueToken -Path $Folder.ApiPath -DriveName 'DbxTest' -NoCache -FileStatus Active } | Should -Not -Throw
     }
 
     It 'accepts -OrderBy LastModifiedTime without error' {
-        { Search-Dropbox -Query $UniqueToken -Path $Folder.ApiPath -DriveName 'DbxTest' -OrderBy LastModifiedTime } | Should -Not -Throw
+        { Search-Dropbox -Query $UniqueToken -Path $Folder.ApiPath -DriveName 'DbxTest' -NoCache -OrderBy LastModifiedTime } | Should -Not -Throw
     }
 
-    It 'accepts -Wildcard with PowerShell glob without error' {
-        { Search-Dropbox -Query "$UniqueToken*" -Path $Folder.ApiPath -DriveName 'DbxTest' -Wildcard } | Should -Not -Throw
+    It 'auto-detects a wildcard query without error' {
+        { Search-Dropbox -Query "$UniqueToken*" -Path $Folder.ApiPath -DriveName 'DbxTest' -NoCache } | Should -Not -Throw
     }
 
     It 'rejects an unknown -FileCategory value' {
-        { Search-Dropbox -Query $UniqueToken -DriveName 'DbxTest' -FileCategory Bogus } | Should -Throw
+        { Search-Dropbox -Query $UniqueToken -DriveName 'DbxTest' -NoCache -FileCategory Bogus } | Should -Throw
     }
 }
 

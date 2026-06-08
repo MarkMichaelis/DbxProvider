@@ -87,6 +87,39 @@ namespace DbxProvider.Cmdlets
             return path.Substring(colon + 1);
         }
 
+        /// <summary>Reports whether a query string contains a PowerShell wildcard
+        /// metacharacter (<c>*</c>, <c>?</c> or <c>[</c>). Cache-backed finders use
+        /// this to auto-detect intent: a query with a wildcard is matched as a glob,
+        /// otherwise it is treated as a substring search.</summary>
+        internal static bool ContainsWildcard(string? value)
+            => !string.IsNullOrEmpty(value) && value.IndexOfAny(new[] { '*', '?', '[' }) >= 0;
+
+        /// <summary>Converts a raw query into a name wildcard pattern for the cache
+        /// finders: a query that already contains a wildcard is used verbatim; a
+        /// plain query is wrapped as a <c>*query*</c> substring match. A blank query
+        /// matches everything.</summary>
+        internal static string ToNamePattern(string? query)
+        {
+            if (string.IsNullOrEmpty(query)) return "*";
+            return ContainsWildcard(query) ? query! : $"*{query}*";
+        }
+
+        /// <summary>Builds the shared name/zero-byte predicate used by the cache
+        /// finders (<c>Search-Dropbox</c> and <c>Find-DropboxConflict</c>): a
+        /// wildcard match on the item name and, when <paramref name="zeroByteOnly"/>
+        /// is set, a restriction to zero-byte files (folders and non-empty files are
+        /// excluded).</summary>
+        internal static Func<DropboxItem, bool> BuildNamePredicate(string namePattern, bool zeroByteOnly)
+        {
+            // A blank or whitespace pattern means "no filter", so treat it the same
+            // as '*' rather than an empty literal that matches only empty filenames.
+            var pattern = string.IsNullOrWhiteSpace(namePattern) ? "*" : namePattern;
+            var matcher = new WildcardMatcher(pattern);
+            return item =>
+                matcher.IsMatch(item.Name)
+                && (!zeroByteOnly || (!item.IsFolder && item.Length == 0));
+        }
+
         private const int RefreshProgressId = 1900;
 
         /// <summary>

@@ -12,15 +12,15 @@ BeforeAll {
     Import-Module (Get-DbxProviderModulePath) -Force -DisableNameChecking -Global
     Connect-DbxTestDrive
     Initialize-DbxTestRoot
-    $script:Folder = New-DbxTestFolder -TestName 'Find'
+    $script:Folder = New-DbxTestFolder -TestName 'Search'
 
     $script:UniqueToken = ('findtok' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
     New-Item -Path "$($Folder.ProviderPath)\$($UniqueToken).txt" -ItemType File -Value 'findable content' -Force | Out-Null
 
-    # Find-DropboxItem reads the local metadata cache (zero API enumeration), so
-    # warm the cache entry for this folder before searching. A Get-ChildItem
-    # write-through populates the entry's items_json deterministically (unlike
-    # Search-Dropbox, there is no server-side indexing latency to wait out).
+    # Search-Dropbox reads the local metadata cache by default (zero API
+    # enumeration), so warm the cache entry for this folder before searching. A
+    # Get-ChildItem write-through populates the entry's items_json deterministically
+    # (unlike the -NoCache server index, there is no indexing latency to wait out).
     Get-ChildItem -LiteralPath $Folder.ProviderPath | Out-Null
 }
 
@@ -29,27 +29,28 @@ AfterAll {
     Disconnect-DbxTestDrive
 }
 
-Describe 'Find-DropboxItem' -Skip:(-not $HasCredentials) {
+Describe 'Search-Dropbox (cache default)' -Skip:(-not $HasCredentials) {
 
-    It 'finds a uniquely-named cached file by -Name wildcard' {
-        $results = @(Find-DropboxItem -Name "*$UniqueToken*" -DriveName 'DbxTest')
+    It 'finds a uniquely-named cached file by wildcard query' {
+        $results = @(Search-Dropbox "*$UniqueToken*" -DriveName 'DbxTest')
+        ($results | Measure-Object).Count | Should -BeGreaterOrEqual 1
+    }
+
+    It 'finds a uniquely-named cached file by plain substring query' {
+        $results = @(Search-Dropbox $UniqueToken -DriveName 'DbxTest')
         ($results | Measure-Object).Count | Should -BeGreaterOrEqual 1
     }
 
     It 'returns nothing for a token that matches no item' {
-        $results = @(Find-DropboxItem -Name "*no-such-$UniqueToken-zzz*" -DriveName 'DbxTest')
+        $results = @(Search-Dropbox "*no-such-$UniqueToken-zzz*" -DriveName 'DbxTest')
         ($results | Measure-Object).Count | Should -Be 0
     }
 
     It 'accepts a -Path subtree without error' {
-        { Find-DropboxItem -Name '*' -Path $Folder.ApiPath -DriveName 'DbxTest' } | Should -Not -Throw
+        { Search-Dropbox '*' -Path $Folder.ApiPath -DriveName 'DbxTest' } | Should -Not -Throw
     }
 
     It 'accepts -ZeroByteOnly without error' {
-        { Find-DropboxItem -Name '*' -ZeroByteOnly -DriveName 'DbxTest' } | Should -Not -Throw
-    }
-
-    It 'defaults -Name to match everything without error' {
-        { Find-DropboxItem -DriveName 'DbxTest' } | Should -Not -Throw
+        { Search-Dropbox '*' -ZeroByteOnly -DriveName 'DbxTest' } | Should -Not -Throw
     }
 }

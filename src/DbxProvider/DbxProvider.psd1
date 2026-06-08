@@ -27,10 +27,8 @@
         'Set-DropboxCacheDatabasePath',
         'Remove-DropboxCacheDatabasePath',
         'Get-DropboxCacheDatabasePath',
-        # Search
+        # Search (cache-backed by default; -NoCache for server search_v2)
         'Search-Dropbox',        # Revisions
-        # Find (cache-backed)
-        'Find-DropboxItem',
         # Conflict scan
         'Find-DropboxConflict',        # Revisions
         'Get-DropboxRevision',

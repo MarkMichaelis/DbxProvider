@@ -13,8 +13,8 @@ namespace DbxProvider.Cmdlets
     /// under a Dropbox subtree by reading the local metadata cache -- no recursive
     /// Dropbox enumeration. The cache is auto-refreshed from the account delta
     /// cursor first (the shared GetRefreshedCache), so results reflect changes
-    /// since the last sync. This delegates to the same cache finder as
-    /// Find-DropboxItem, fixing the hard-coded conflict pattern and the zero-byte
+    /// since the last sync. This shares the same cache name/zero-byte predicate as
+    /// Search-Dropbox, fixing the hard-coded conflict pattern and the zero-byte
     /// filter. Build or refresh the cache with Build-DropboxCacheAll.ps1. A legacy
     /// *.state.json sidecar from an earlier version is archived to .bak on sight.
     /// </summary>
@@ -52,8 +52,8 @@ namespace DbxProvider.Cmdlets
 
             if (cache.PersistedCount() == 0)
             {
-                // Match Find-DropboxItem: an empty cache looks like "no conflicts"
-                // when the real issue is the cache was never built. Say so.
+                // An empty cache looks like "no conflicts" when the real issue is
+                // the cache was never built. Say so.
                 WriteWarning(
                     "The metadata cache is empty. Run Build-DropboxCacheAll.ps1 (or " +
                     "Build-DropboxCache) to populate it before scanning for conflicts.");
@@ -62,7 +62,7 @@ namespace DbxProvider.Cmdlets
 
             // Conflict matches are always files (never folders), preserving the
             // original files-only semantics that make the result safe to delete.
-            var namePredicate = FindDropboxItemCommand.BuildNamePredicate(
+            var namePredicate = BuildNamePredicate(
                 Pattern, zeroByteOnly: !IncludeNonZero.IsPresent);
             var matches = cache.FindItems(
                 item => !item.IsFolder && namePredicate(item), startPath);
