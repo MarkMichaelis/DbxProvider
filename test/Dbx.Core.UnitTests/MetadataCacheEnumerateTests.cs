@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using IntelliTect.Dropbox;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace Dbx.Core.UnitTests;
@@ -109,5 +110,39 @@ public sealed class MetadataCacheEnumerateTests : IDisposable
 
         matches.Select(i => i.Path)
             .Should().BeEquivalentTo(new[] { "/A/report's conflicted copy.txt" });
+    }
+
+    [Fact]
+    public async Task EnumerateItems_SkipsRowWithCorruptJson_WithoutThrowing()
+    {
+        string dbPath;
+        {
+            var service = new FakeListServiceClient(SampleTree());
+            using var cache = new MetadataCache(service, "acct", "user@example.com", Opts());
+            await cache.BuildAsync("/");
+            dbPath = cache.DatabasePath;
+        } // dispose flushes and closes the connection so the row can be corrupted
+
+        // Replace the '/A' entry's stored item list with non-JSON text.
+        var connectionString = new SqliteConnectionStringBuilder { DataSource = dbPath }.ToString();
+        using (var conn = new SqliteConnection(connectionString))
+        {
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE entries SET items_json = $bad WHERE items_json LIKE '%file2.txt%';";
+            cmd.Parameters.AddWithValue("$bad", "this is not json");
+            cmd.ExecuteNonQuery().Should().Be(1);
+        }
+
+        // A fresh cache over the same database reads the corrupt row from disk.
+        var service2 = new FakeListServiceClient(SampleTree());
+        using var reopened = new MetadataCache(service2, "acct", "user@example.com", Opts());
+
+        var items = reopened.EnumerateItems().Select(i => i.Path).ToList();
+
+        // The corrupt '/A' row is skipped (its children are gone) but the valid
+        // '/A/B' entry still yields its item -- and nothing throws.
+        items.Should().Contain("/A/B/file.txt");
+        items.Should().NotContain("/A/file2.txt");
     }
 }

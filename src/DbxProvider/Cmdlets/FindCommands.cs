@@ -64,7 +64,11 @@ namespace DbxProvider.Cmdlets
         /// </summary>
         internal static Func<DropboxItem, bool> BuildNamePredicate(string namePattern, bool zeroByteOnly)
         {
-            var matcher = new WildcardMatcher(namePattern ?? "*");
+            // A blank or whitespace pattern (e.g. a computed-but-empty -Name)
+            // means "no filter", so treat it the same as the default '*' rather
+            // than an empty literal that would match only empty filenames.
+            var pattern = string.IsNullOrWhiteSpace(namePattern) ? "*" : namePattern;
+            var matcher = new WildcardMatcher(pattern);
             return item =>
                 matcher.IsMatch(item.Name)
                 && (!zeroByteOnly || (!item.IsFolder && item.Length == 0));

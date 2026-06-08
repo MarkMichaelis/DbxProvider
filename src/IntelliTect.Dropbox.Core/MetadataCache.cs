@@ -1108,9 +1108,9 @@ namespace IntelliTect.Dropbox
                     return JsonSerializer.Deserialize<List<DropboxItem>>(reader.GetString(0), JsonOpts)
                            ?? new List<DropboxItem>();
                 }
-                catch
+                catch (JsonException)
                 {
-                    return null; // skip corrupt row
+                    return null; // skip corrupt JSON row; other failures propagate
                 }
             }
         }
