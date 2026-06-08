@@ -47,6 +47,15 @@ namespace DbxProvider.Cmdlets
             summary.Properties.Add(new PSNoteProperty("Enabled", cache.Options.Enabled));
             summary.Properties.Add(new PSNoteProperty("MaxInMemoryEntries", cache.Options.MaxInMemoryEntries));
             summary.Properties.Add(new PSNoteProperty("FlushIntervalSeconds", cache.Options.FlushIntervalSeconds));
+
+            var sync = cache.GetSyncState();
+            summary.Properties.Add(new PSNoteProperty("SyncCursorCaptured", sync != null));
+            summary.Properties.Add(new PSNoteProperty("SyncCursorCapturedUtc",
+                sync?.CapturedUtc as object ?? ""));
+            summary.Properties.Add(new PSNoteProperty("SyncLastSyncedUtc",
+                sync?.LastSyncedUtc as object ?? ""));
+            summary.Properties.Add(new PSNoteProperty("SyncCursorAge",
+                sync == null ? "" : FormatAge(DateTime.UtcNow - sync.CapturedUtc)));
             WriteObject(summary);
 
             foreach (var entry in cache.SnapshotInfo().OrderBy(e => e.Path))
@@ -64,6 +73,15 @@ namespace DbxProvider.Cmdlets
                         : entry.Cursor.Substring(0, Math.Min(16, entry.Cursor.Length)) + "..."));
                 WriteObject(row);
             }
+        }
+
+        private static string FormatAge(TimeSpan age)
+        {
+            if (age < TimeSpan.Zero) age = TimeSpan.Zero;
+            if (age.TotalDays >= 1) return $"{(int)age.TotalDays}d {age.Hours}h";
+            if (age.TotalHours >= 1) return $"{(int)age.TotalHours}h {age.Minutes}m";
+            if (age.TotalMinutes >= 1) return $"{(int)age.TotalMinutes}m";
+            return $"{(int)age.TotalSeconds}s";
         }
     }
 
@@ -106,6 +124,11 @@ namespace DbxProvider.Cmdlets
     /// recursive listing page by page (resumable across interruptions), and
     /// optionally caches each file's revision history with
     /// <see cref="IncludeRevisions"/>.
+    ///
+    /// On entry the account-wide delta cursor is captured if absent (the
+    /// incremental-sync anchor). Pass <see cref="Refresh"/> to instead drain
+    /// changes since that cursor into the cache, or <see cref="Rebuild"/> to wipe
+    /// the cache and rebuild from a fresh cursor.
     /// </summary>
     [Cmdlet(VerbsLifecycle.Build, "DropboxCache", SupportsShouldProcess = true)]
     [OutputType(typeof(PSObject))]
@@ -119,6 +142,17 @@ namespace DbxProvider.Cmdlets
         [Parameter]
         public SwitchParameter IncludeRevisions { get; set; }
 
+        /// <summary>Drain account-wide changes since the captured delta cursor into
+        /// the cache instead of building. This is the incremental refresh path.</summary>
+        [Parameter]
+        public SwitchParameter Refresh { get; set; }
+
+        /// <summary>Wipe the entire cache (entries, build progress) and rebuild from
+        /// a freshly captured delta cursor. Account-wide; the build root defaults to
+        /// the account root.</summary>
+        [Parameter]
+        public SwitchParameter Rebuild { get; set; }
+
         protected override void ProcessRecord()
         {
             var cache = CacheCmdletHelpers.GetCache(this, DriveName);
@@ -128,14 +162,62 @@ namespace DbxProvider.Cmdlets
                 return;
             }
 
-            if (!ShouldProcess($"{DriveName}:{Path}", "Build metadata cache"))
+            if (Refresh.IsPresent && Rebuild.IsPresent)
+                throw new PSArgumentException("-Refresh and -Rebuild cannot be used together.");
+
+            if (Refresh.IsPresent)
+            {
+                RefreshFromCursor(cache);
                 return;
+            }
+
+            if (Rebuild.IsPresent)
+            {
+                if (!ShouldProcess($"{DriveName}:{Path}", "Rebuild metadata cache"))
+                    return;
+                cache.Clear(null);
+                cache.ClearBuildProgress(null);
+                Run(ct => cache.ResetSyncCursorAsync(ct));
+            }
+            else
+            {
+                if (!ShouldProcess($"{DriveName}:{Path}", "Build metadata cache"))
+                    return;
+                Run(ct => cache.EnsureSyncCursorAsync(ct));
+            }
 
             var result = Run(ct => cache.BuildAsync(Path, ct));
             if (IncludeRevisions.IsPresent)
                 BuildRevisions(cache, result);
 
             WriteObject(BuildSummary(result));
+        }
+
+        private void RefreshFromCursor(MetadataCache cache)
+        {
+            if (!ShouldProcess($"{DriveName}:", "Refresh metadata cache from delta cursor"))
+                return;
+
+            Run(ct => cache.EnsureSyncCursorAsync(ct));
+            var sync = Run(ct => cache.SyncAsync(ct));
+            if (sync.ResetRequired)
+                WriteWarning(
+                    "Dropbox rejected the saved delta cursor. Run 'Build-DropboxCache -Rebuild' " +
+                    "for a clean baseline.");
+
+            WriteObject(RefreshSummary(sync));
+        }
+
+        private PSObject RefreshSummary(MetadataCache.SyncResult sync)
+        {
+            var summary = new PSObject();
+            summary.Properties.Add(new PSNoteProperty("DriveName", DriveName));
+            summary.Properties.Add(new PSNoteProperty("Mode", "Refresh"));
+            summary.Properties.Add(new PSNoteProperty("DeltaPages", sync.Pages));
+            summary.Properties.Add(new PSNoteProperty("ItemsAdded", sync.Added));
+            summary.Properties.Add(new PSNoteProperty("ItemsRemoved", sync.Removed));
+            summary.Properties.Add(new PSNoteProperty("ResetRequired", sync.ResetRequired));
+            return summary;
         }
 
         private void BuildRevisions(MetadataCache cache, MetadataCache.BuildResult result)

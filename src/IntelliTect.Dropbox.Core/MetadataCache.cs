@@ -70,6 +70,41 @@ namespace IntelliTect.Dropbox
             public bool InMemory { get; set; }
         }
 
+        /// <summary>
+        /// Account-wide incremental-sync anchor: the recursive delta cursor
+        /// captured at build start, together with when it was captured and when it
+        /// was last drained by <see cref="SyncAsync"/>.
+        /// </summary>
+        public sealed class SyncStateInfo
+        {
+            /// <summary>The captured (or last-advanced) account delta cursor.</summary>
+            public string Cursor { get; set; } = "";
+
+            /// <summary>UTC time the original cursor was captured (build start).</summary>
+            public DateTime CapturedUtc { get; set; }
+
+            /// <summary>UTC time of the most recent successful drain, or
+            /// <c>null</c> when the cursor has never been drained.</summary>
+            public DateTime? LastSyncedUtc { get; set; }
+        }
+
+        /// <summary>Outcome of an incremental <see cref="SyncAsync"/> drain.</summary>
+        public sealed class SyncResult
+        {
+            /// <summary>Number of delta adds/updates applied to cache entries.</summary>
+            public int Added { get; set; }
+
+            /// <summary>Number of delta removes applied to cache entries.</summary>
+            public int Removed { get; set; }
+
+            /// <summary>Number of <c>list_folder/continue</c> pages drained.</summary>
+            public int Pages { get; set; }
+
+            /// <summary>True when Dropbox rejected the cursor; the caller must
+            /// rebuild the cache (the deltas could not be applied incrementally).</summary>
+            public bool ResetRequired { get; set; }
+        }
+
         private readonly DropboxServiceClient _service;
         private readonly CacheOptions _options;
         private readonly string _accountId;
@@ -620,6 +655,124 @@ namespace IntelliTect.Dropbox
             DeleteRow(key);
         }
 
+        // ----- incremental sync (account-wide delta cursor) -------------------
+
+        /// <summary>
+        /// Captures the account-wide recursive delta cursor as the incremental-sync
+        /// anchor, but ONLY when none has been captured yet (capture-if-absent).
+        /// Call this at the start of a build so the cursor marks the pre-build
+        /// state; a later <see cref="SyncAsync"/> then replays every change since,
+        /// including changes made during the build itself. Returns <c>true</c> when
+        /// a new cursor was captured, or <c>false</c> when one already existed and
+        /// was left untouched (so resuming an interrupted build keeps the original
+        /// start cursor).
+        /// </summary>
+        public async Task<bool> EnsureSyncCursorAsync(CancellationToken cancellationToken = default)
+        {
+            if (!_options.Enabled) return false;
+            if (GetSyncState() != null) return false;
+            var cursor = await _service.GetLatestCursorAsync("", recursive: true, cancellationToken);
+            SaveSyncState(cursor, DateTime.UtcNow, lastSyncedUtc: "");
+            return true;
+        }
+
+        /// <summary>
+        /// Discards any captured sync cursor and captures a fresh one for the
+        /// current account state. Used by a full rebuild so the new cursor anchors
+        /// the rebuilt cache.
+        /// </summary>
+        public async Task ResetSyncCursorAsync(CancellationToken cancellationToken = default)
+        {
+            if (!_options.Enabled) return;
+            var cursor = await _service.GetLatestCursorAsync("", recursive: true, cancellationToken);
+            SaveSyncState(cursor, DateTime.UtcNow, lastSyncedUtc: "");
+        }
+
+        /// <summary>
+        /// Brings the cache up to date by draining account-wide deltas from the
+        /// captured sync cursor (<c>list_folder/continue</c>), applying each page's
+        /// adds/updates/removes to the matching parent-folder entries and advancing
+        /// plus persisting the cursor after every page so an interrupted drain
+        /// resumes from the last completed page. When Dropbox signals the cursor is
+        /// no longer usable, returns with <see cref="SyncResult.ResetRequired"/> set
+        /// so the caller can rebuild.
+        /// </summary>
+        public async Task<SyncResult> SyncAsync(CancellationToken cancellationToken = default)
+        {
+            var result = new SyncResult();
+            if (!_options.Enabled) return result;
+
+            var state = GetSyncState();
+            if (state == null)
+                throw new InvalidOperationException(
+                    "No sync cursor has been captured. Build the cache first so a cursor is recorded.");
+
+            var cursor = state.Cursor;
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var delta = await _service.ListFolderContinueRawAsync(cursor, cancellationToken);
+                if (delta.ResetRequired)
+                {
+                    result.ResetRequired = true;
+                    return result;
+                }
+
+                foreach (var item in delta.AddsOrUpdates)
+                    if (ApplyDeltaAdd(item)) result.Added++;
+                foreach (var removed in delta.Removes)
+                    if (ApplyDeltaRemove(removed)) result.Removed++;
+
+                cursor = delta.NewCursor;
+                result.Pages++;
+                PersistSyncPage(cursor, DateTime.UtcNow);
+                EvictIfOverBudget();
+                if (!delta.HasMore) break;
+            }
+
+            return result;
+        }
+
+        /// <summary>Applies one delta add/update to the parent folder's cached
+        /// entry, hydrating the parent from disk when necessary and ensuring a new
+        /// folder item also gets its own (initially empty) entry so its later
+        /// children attach. Returns <c>true</c> when the change landed; <c>false</c>
+        /// when the parent folder is not cached (nothing to attach to).</summary>
+        private bool ApplyDeltaAdd(DropboxItem item)
+        {
+            var parent = ParentOf(item.Path) ?? "";
+            if (!TryGet(parent, out var entry) || entry == null) return false;
+            ApplyAddTo(entry, item);
+            entry.Dirty = true;
+            if (item.IsFolder) GetOrCreateBuildEntry(MakeKey(item.Path), item.Path);
+            return true;
+        }
+
+        /// <summary>Applies one delta remove (a lowercased path) by dropping the
+        /// item from its parent folder's entry and deleting the path's own entry
+        /// when it was a cached folder. Returns <c>true</c> when an item was removed
+        /// from a parent entry.</summary>
+        private bool ApplyDeltaRemove(string loweredPath)
+        {
+            var changed = false;
+            var parent = ParentOf(loweredPath) ?? "";
+            if (TryGet(parent, out var entry) && entry != null)
+            {
+                var before = entry.Items.Count;
+                entry.Items.RemoveAll(i => (i.Path ?? "").ToLowerInvariant() == loweredPath);
+                if (entry.Items.Count != before)
+                {
+                    entry.Dirty = true;
+                    changed = true;
+                }
+            }
+
+            var key = MakeKey(loweredPath);
+            _entries.TryRemove(key, out _);
+            DeleteRow(key);
+            return changed;
+        }
+
         // ----- write-through ---------------------------------------------------
 
         /// <summary>Mark the parent folder as dirty after a mutation. The
@@ -792,6 +945,12 @@ namespace IntelliTect.Dropbox
                     "CREATE TABLE IF NOT EXISTS revision_progress (" +
                     "  path_lower TEXT PRIMARY KEY," +
                     "  fetched_utc TEXT NOT NULL" +
+                    ");" +
+                    "CREATE TABLE IF NOT EXISTS sync_state (" +
+                    "  id INTEGER PRIMARY KEY CHECK (id = 1)," +
+                    "  cursor TEXT NOT NULL," +
+                    "  captured_utc TEXT NOT NULL," +
+                    "  last_synced_utc TEXT NOT NULL DEFAULT ''" +
                     ");";
                 pragma.ExecuteNonQuery();
             }
@@ -921,6 +1080,28 @@ namespace IntelliTect.Dropbox
         public bool IsBuildComplete(string path) =>
             LoadBuildProgress(MakeKey(DropboxServiceClient.NormalizePath(path))) is { Complete: true };
 
+        /// <summary>Drops recorded build progress so a subsequent build re-walks the
+        /// subtree, or the whole account when <paramref name="path"/> is null. Used
+        /// by a rebuild so a previously-completed build is not skipped.</summary>
+        public void ClearBuildProgress(string? path = null)
+        {
+            lock (_diskLock)
+            {
+                using var cmd = _db.CreateCommand();
+                if (path == null)
+                {
+                    cmd.CommandText = "DELETE FROM build_progress;";
+                }
+                else
+                {
+                    cmd.CommandText = "DELETE FROM build_progress WHERE root_path_lower = $k;";
+                    cmd.Parameters.AddWithValue("$k",
+                        MakeKey(DropboxServiceClient.NormalizePath(path)));
+                }
+                cmd.ExecuteNonQuery();
+            }
+        }
+
         /// <summary>Persists the build progress row for a subtree root.</summary>
         private void SaveBuildProgress(string rootKey, string cursor, bool complete)
         {
@@ -961,6 +1142,71 @@ namespace IntelliTect.Dropbox
                     entry.Dirty = false;
                 }
                 UpsertBuildProgress(rootKey, cursor, complete);
+                tx.Commit();
+            }
+        }
+
+        /// <summary>Loads the persisted account sync state, or <c>null</c> when no
+        /// cursor has been captured.</summary>
+        public SyncStateInfo? GetSyncState()
+        {
+            lock (_diskLock)
+            {
+                using var cmd = _db.CreateCommand();
+                cmd.CommandText =
+                    "SELECT cursor, captured_utc, last_synced_utc FROM sync_state WHERE id = 1;";
+                using var reader = cmd.ExecuteReader();
+                if (!reader.Read()) return null;
+                var lastSynced = reader.GetString(2);
+                return new SyncStateInfo
+                {
+                    Cursor = reader.GetString(0),
+                    CapturedUtc = ParseUtc(reader.GetString(1)),
+                    LastSyncedUtc = string.IsNullOrEmpty(lastSynced) ? null : ParseUtc(lastSynced)
+                };
+            }
+        }
+
+        /// <summary>Inserts or replaces the singleton account sync-state row.</summary>
+        private void SaveSyncState(string cursor, DateTime capturedUtc, string lastSyncedUtc)
+        {
+            lock (_diskLock)
+            {
+                using var cmd = _db.CreateCommand();
+                cmd.CommandText =
+                    "INSERT INTO sync_state (id, cursor, captured_utc, last_synced_utc) " +
+                    "VALUES (1, $c, $cap, $ls) " +
+                    "ON CONFLICT(id) DO UPDATE SET " +
+                    "  cursor=excluded.cursor, captured_utc=excluded.captured_utc, " +
+                    "  last_synced_utc=excluded.last_synced_utc;";
+                cmd.Parameters.AddWithValue("$c", cursor);
+                cmd.Parameters.AddWithValue("$cap", FormatUtc(capturedUtc));
+                cmd.Parameters.AddWithValue("$ls", lastSyncedUtc);
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        /// <summary>Flushes the dirty entries mutated while applying one delta page
+        /// and advances the persisted sync cursor in a single transaction, so an
+        /// interrupted drain resumes from exactly the last completed page.</summary>
+        private void PersistSyncPage(string cursor, DateTime lastSyncedUtc)
+        {
+            lock (_diskLock)
+            {
+                using var tx = _db.BeginTransaction();
+                foreach (var entry in _entries.Values)
+                {
+                    if (!entry.Dirty) continue;
+                    UpsertEntry(entry);
+                    entry.Dirty = false;
+                }
+
+                using var cmd = _db.CreateCommand();
+                cmd.CommandText =
+                    "UPDATE sync_state SET cursor=$c, last_synced_utc=$ls WHERE id = 1;";
+                cmd.Parameters.AddWithValue("$c", cursor);
+                cmd.Parameters.AddWithValue("$ls", FormatUtc(lastSyncedUtc));
+                cmd.ExecuteNonQuery();
                 tx.Commit();
             }
         }

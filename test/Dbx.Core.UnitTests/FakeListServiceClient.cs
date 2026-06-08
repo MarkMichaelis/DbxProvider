@@ -35,6 +35,15 @@ internal sealed class FakeListServiceClient : DropboxServiceClient
     /// <summary>Number of <c>list_folder/continue</c> calls made.</summary>
     public int ContinueCalls { get; private set; }
 
+    /// <summary>Number of <c>get_latest_cursor</c> calls made.</summary>
+    public int GetLatestCursorCalls { get; private set; }
+
+    /// <summary>Scripted deltas returned, in order, by continue calls whose cursor
+    /// is a sync cursor (one produced by <see cref="GetLatestCursorAsync"/>). Each
+    /// dequeued delta simulates one page of account-wide changes; when the queue
+    /// is empty a terminal empty delta is returned.</summary>
+    public Queue<ListFolderDelta> SyncDeltas { get; } = new();
+
     /// <summary>Cursors passed to each continue call, in order.</summary>
     public List<string> ContinueCursors { get; } = new();
 
@@ -142,6 +151,13 @@ internal sealed class FakeListServiceClient : DropboxServiceClient
         if (ThrowOnContinueCall.HasValue && ContinueCalls == ThrowOnContinueCall.Value)
             throw new OperationCanceledException();
 
+        if (cursor.StartsWith("sync::", StringComparison.Ordinal))
+        {
+            return Task.FromResult(SyncDeltas.Count > 0
+                ? SyncDeltas.Dequeue()
+                : new ListFolderDelta { NewCursor = cursor, HasMore = false });
+        }
+
         var (root, index) = ParseCursor(cursor);
         var all = Recursive(root);
         var take = Math.Min(PageSize, all.Count - index);
@@ -149,6 +165,12 @@ internal sealed class FakeListServiceClient : DropboxServiceClient
         var delta = new ListFolderDelta { NewCursor = MakeCursor(root, next), HasMore = next < all.Count };
         delta.AddsOrUpdates.AddRange(all.Skip(index).Take(take));
         return Task.FromResult(delta);
+    }
+
+    public override Task<string> GetLatestCursorAsync(string path, bool recursive = false, CancellationToken cancellationToken = default)
+    {
+        GetLatestCursorCalls++;
+        return Task.FromResult($"sync::{GetLatestCursorCalls}");
     }
 
     public override Task<List<DropboxRevision>> ListRevisionsAsync(string path, int limit = 10, CancellationToken cancellationToken = default)

@@ -37,6 +37,26 @@ fetches each file's revision history (`list_revisions`) and stores it. Files
 whose revisions were fetched within the staleness window (24 hours by default)
 are skipped, so repeating the pass is cheap.
 
+### Incremental refresh (account-wide delta cursor)
+
+A full build of a large account is expensive, so the cache supports an
+incremental refresh that brings it up to date without re-walking everything.
+`MetadataCache.EnsureSyncCursorAsync()` captures a single account-wide recursive
+delta cursor **at build start** (via `list_folder/get_latest_cursor`, which
+returns in constant time and never enumerates entries, so it cannot wedge on a
+huge account). It is capture-if-absent, so resuming an interrupted build keeps
+the original anchor.
+
+`MetadataCache.SyncAsync()` later drains `list_folder/continue` from that cursor,
+applying each page's adds/updates/removes to the matching parent-folder entries
+and advancing plus persisting the cursor after every page (so an interrupted
+drain resumes from the last completed page). If Dropbox rejects the cursor, the
+result's `ResetRequired` flag signals that a full rebuild is needed.
+`ResetSyncCursorAsync()` discards the cursor and captures a fresh one for a
+rebuild. The whole flow is exposed through the single `Build-DropboxCache`
+cmdlet: a normal build captures the cursor, `-Refresh` drains deltas, and
+`-Rebuild` wipes the cache and recaptures.
+
 ### Persistence schema
 
 ```mermaid
@@ -69,6 +89,12 @@ erDiagram
         TEXT path_lower PK
         TEXT fetched_utc
     }
+    sync_state {
+        INTEGER id PK
+        TEXT cursor
+        TEXT captured_utc
+        TEXT last_synced_utc
+    }
     entries ||--o{ revisions : "file rows have revisions"
     build_progress ||--|| entries : "tracks subtree build"
     revisions ||--|| revision_progress : "fetch watermark per file"
@@ -77,3 +103,5 @@ erDiagram
 - `build_progress` records the resumable subtree cursor and a completion flag.
 - `revisions` holds one row per file revision, keyed by path and rev.
 - `revision_progress` is the per-file fetch watermark used for staleness skips.
+- `sync_state` is a single row holding the account-wide delta cursor used by the
+  incremental refresh, with its capture and last-drained timestamps.
