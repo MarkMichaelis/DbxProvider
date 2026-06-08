@@ -9,56 +9,62 @@ schema: 2.0.0
 
 ## SYNOPSIS
 
-Searches for files and folders by name or content in Dropbox.
+Searches Dropbox for files and folders by name (cache-first).
 
 ## SYNTAX
 
 ```
-Search-Dropbox [-Query] <String> [-Path <String>] [-MaxResults <Int32>] [-IncludeHighlights] [-FilenameOnly]
- [-FileExtensions <String[]>] [-FileCategory <String[]>] [-FileStatus <String>] [-OrderBy <String>] [-Wildcard]
- [-DriveName <String>] [-ProgressAction <ActionPreference>] [<CommonParameters>]
+Search-Dropbox [-Query] <String> [-Path <String>] [-NoCache] [-ZeroByteOnly] [-MaxResults <Int32>]
+ [-IncludeHighlights] [-FilenameOnly] [-FileExtensions <String[]>] [-FileCategory <String[]>]
+ [-FileStatus <String>] [-OrderBy <String>] [-DriveName <String>] [-ProgressAction <ActionPreference>]
+ [<CommonParameters>]
 ```
 
 ## DESCRIPTION
 
-Calls the Dropbox `files/search_v2` endpoint with the given query and
-returns matching items as `DropboxSearchResult` objects. The search
-covers file and folder names; depending on the indexer state Dropbox
-may also match file contents for supported types.
+By default `Search-Dropbox` searches the local metadata cache: it issues zero
+Dropbox API calls for the lookup, is exhaustive, and auto-refreshes from the
+account delta cursor first, which is far faster than crawling the account. The
+query is matched as a glob when it contains a wildcard (`*`, `?` or `[`) and as
+a substring otherwise. Cache matches are returned as `DropboxItem` objects.
 
-**Note:** Dropbox search is *prefix-token-based*, not glob. Filenames are
-split into tokens on punctuation and whitespace, and each query token is
-matched as a prefix against a filename token. `*` and `?` in `-Query`
-are treated as literal characters and effectively ignored. Use
-`-FileExtensions` for true extension filtering, or `-Wildcard` to apply
-PowerShell wildcard semantics on top of the search results.
+Use `-NoCache` to fall back to the Dropbox `files/search_v2` index instead. The
+server search also matches file *contents* for supported types and honors the
+server-side filters (`-FileCategory`, `-FileExtensions`, `-FileStatus`,
+`-OrderBy`, `-IncludeHighlights`); it returns `DropboxSearchResult` objects.
 
-Use `-Path` to restrict the search to a subtree, `-MaxResults` to
-cap the page size, and `-IncludeHighlights` to receive snippet
-highlights in the result objects.
+Build or refresh the cache with `Build-DropboxCacheAll.ps1`. Use `-Path` to
+restrict either engine to a subtree.
 
 ## EXAMPLES
 
 ### Example 1
 ```powershell
-PS> Search-Dropbox -Query "budget"
+PS> Search-Dropbox "budget"
 ```
 
-Returns up to 100 items whose name or contents match "budget" anywhere in the account.
+Substring search of the local cache; returns every cached item whose name contains "budget".
 
 ### Example 2
 ```powershell
-PS> Search-Dropbox -Query "*.docx" -Path "/Reports" -MaxResults 25
+PS> Search-Dropbox "*.docx" -Path "/Reports"
 ```
 
-Restricts the search to ``/Reports`` and limits the result set to 25 items.
+Wildcard (glob) search of the cache under ``/Reports`` - the wildcard is auto-detected, no switch needed.
 
 ### Example 3
 ```powershell
-PS> Search-Dropbox -Query "TODO" -IncludeHighlights | Select-Object Path, Highlights
+PS> Search-Dropbox "TODO" -NoCache -IncludeHighlights | Select-Object Path, Highlights
 ```
 
-Returns matches with content snippets so you can see why each item matched.
+Server-side ``search_v2`` query (matches file contents) with snippet highlights so you can see why each item matched.
+
+### Example 4
+```powershell
+PS> Search-Dropbox "*" -ZeroByteOnly | Measure-Object
+```
+
+Counts every zero-byte file in the cache.
 
 ## PARAMETERS
 
@@ -119,9 +125,9 @@ Accept wildcard characters: False
 ### -FilenameOnly
 
 Restrict matching to filenames; skip file content indexing. Faster and
-avoids false positives from document contents. Does NOT enable
-wildcards (Dropbox search is prefix-token-based; use `-Wildcard` for
-PowerShell wildcard semantics).
+avoids false positives from document contents. Server mode only
+(`-NoCache`); ignored in the default cache mode, which always matches on
+names.
 
 ```yaml
 Type: SwitchParameter
@@ -236,7 +242,9 @@ Accept wildcard characters: False
 
 ### -Query
 
-Search expression. Supports plain words and simple wildcards (e.g. ``*.docx``).
+Search query. A query containing a wildcard (`*`, `?` or `[`) is matched
+as a glob; otherwise it is a substring match. In cache mode this matches
+item names; with `-NoCache` it is passed to the server index.
 
 ```yaml
 Type: String
@@ -247,15 +255,32 @@ Required: True
 Position: 0
 Default value: None
 Accept pipeline input: False
+Accept wildcard characters: True
+```
+
+### -NoCache
+
+Search the server-side `search_v2` index instead of the local metadata
+cache. Slower, but matches file contents and honors the server-side
+filters (`-FileCategory`, `-FileExtensions`, `-FileStatus`, `-OrderBy`,
+`-IncludeHighlights`). Returns `DropboxSearchResult` objects.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
 Accept wildcard characters: False
 ```
 
-### -Wildcard
+### -ZeroByteOnly
 
-Treat `-Query` as a PowerShell wildcard pattern (`*`, `?`, `[abc]`).
-Implies `-FilenameOnly`. Tokens are derived from the pattern for the
-server-side query, then results are post-filtered with
-`WildcardPattern` to enforce true PowerShell glob semantics.
+Match only zero-byte files (skips folders and non-empty files). Cache
+mode only; ignored with `-NoCache`.
 
 ```yaml
 Type: SwitchParameter
@@ -278,7 +303,13 @@ This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable
 
 ## OUTPUTS
 
+### IntelliTect.Dropbox.DropboxItem
+
+Returned in the default cache mode (one per matching cached item).
+
 ### IntelliTect.Dropbox.DropboxSearchResult
+
+Returned with `-NoCache` (one per server search hit).
 
 ## NOTES
 

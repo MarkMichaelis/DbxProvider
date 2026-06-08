@@ -316,51 +316,40 @@ Connect-Dropbox -AppKey "your-app-key"
 Disconnect-Dropbox
 ```
 
-### Search
+### Search (cache-first)
 ```powershell
-# Token search (default): "quarterly" AND "report" as prefix tokens against
-# both filenames and file contents.
-Search-Dropbox "quarterly report"
-Search-Dropbox "budget" -Path "/Finance" -MaxResults 50
+# Cache search (default): zero-API, exhaustive, auto-refreshed. Plain text is a
+# substring match against item names.
+Search-Dropbox "budget"
+Search-Dropbox "budget" -Path "Dbx:\Finance"
 
-# Restrict matching to filenames (skip content indexing — faster)
-Search-Dropbox "budget" -FilenameOnly
+# Wildcards are auto-detected (no switch): a query with * ? or [ is a glob match.
+Search-Dropbox "*.pdf"
+Search-Dropbox "Q4*.xlsx" -Path /Finance/2025
 
-# Server-side extension filter — the right way to do "*.docx"
-Search-Dropbox "report" -FileExtensions pdf,docx,xlsx
+# Restrict to zero-byte files (cache mode only)
+Search-Dropbox "*" -ZeroByteOnly | Measure-Object
 
-# Server-side category filter
-Search-Dropbox "kickoff" -FileCategory Document,Paper,Spreadsheet
-
-# Search deleted files
-Search-Dropbox "old-contract" -FileStatus Deleted
-
-# Order by last modified instead of relevance
-Search-Dropbox "invoice" -OrderBy LastModifiedTime
-
-# True PowerShell-wildcard semantics (post-filtered with WildcardPattern)
-Search-Dropbox "*.docx"   -Wildcard
-Search-Dropbox "Q4*.xlsx" -Wildcard -Path /Finance/2025
+# Server-side search_v2 (-NoCache): matches file CONTENTS and supports the
+# server-side filters below.
+Search-Dropbox "quarterly report" -NoCache
+Search-Dropbox "budget" -NoCache -FilenameOnly -MaxResults 50
+Search-Dropbox "report" -NoCache -FileExtensions pdf,docx,xlsx
+Search-Dropbox "kickoff" -NoCache -FileCategory Document,Paper,Spreadsheet
+Search-Dropbox "old-contract" -NoCache -FileStatus Deleted
+Search-Dropbox "invoice" -NoCache -OrderBy LastModifiedTime
 ```
 
-> **Note on Dropbox search semantics.** `files/search_v2` is *prefix-token-based*,
-> not glob. A query like `"*.docx"` is split on punctuation/wildcards and
-> tokens are prefix-matched against filename tokens (and, by default, file
-> contents). `*` and `?` are treated as literals and effectively ignored.
-> Use `-FileExtensions` for server-side extension filtering, or `-Wildcard`
-> to apply true PowerShell glob semantics on top of the search results.
+> **Cache vs server.** The default cache engine reads the local SQLite metadata
+> cache (zero API; matches on name and size) and returns in seconds even on
+> accounts with millions of items. `-NoCache` queries Dropbox's server-side
+> `search_v2` index, which is *prefix-token-based* (not glob) and also matches
+> file contents. Build or refresh the cache with `Build-DropboxCacheAll.ps1`.
 
-### Find in the local cache (zero-API)
+### Find conflict files (zero-API)
 ```powershell
-# Find by filename wildcard (-like semantics) across the whole account
-Find-DropboxItem -Name '*.pdf'
-
-# Scope to a subtree and/or restrict to zero-byte files
-Find-DropboxItem -Name 'budget*' -Path 'Dbx:\Finance'
-Find-DropboxItem -Name '*' -ZeroByteOnly | Measure-Object
-
-# Find zero-byte "conflicted copy" files (delegates to Find-DropboxItem with the
-# conflict pattern + zero-byte filter), then preview deleting them
+# Find zero-byte "conflicted copy" files (the cache conflict pattern + zero-byte
+# filter), then preview deleting them
 Find-DropboxConflict
 Find-DropboxConflict -Path 'Dbx:\Projects' | Remove-DropboxItemBatch -WhatIf
 
@@ -368,17 +357,12 @@ Find-DropboxConflict -Path 'Dbx:\Projects' | Remove-DropboxItemBatch -WhatIf
 Find-DropboxConflict -IncludeNonZero
 ```
 
-`Find-DropboxItem` and `Find-DropboxConflict` read the local SQLite metadata
-cache instead of enumerating the Dropbox API, so they return in seconds even on
-accounts with millions of items. Both auto-refresh the cache from the account
-delta cursor first (a transient progress bar shows the drain, then reports
-`Refreshed cache: N added, M removed`); build or refresh the cache with
+`Search-Dropbox` (cache mode) and `Find-DropboxConflict` read the local SQLite
+metadata cache instead of enumerating the Dropbox API, so they return in seconds
+even on accounts with millions of items. Both auto-refresh the cache from the
+account delta cursor first (a transient progress bar shows the drain, then
+reports `Refreshed cache: N added, M removed`); build or refresh the cache with
 `Build-DropboxCacheAll.ps1` (use `-Rebuild` if Dropbox rejects the saved cursor).
-
-> **Find vs Search.** `Find-*` reads the local metadata cache (zero API; name and
-> size only). `Search-Dropbox` queries Dropbox's server-side `search_v2` index
-> (filename and content tokens). Use `Find-DropboxItem` for fast, repeatable
-> name/size sweeps over a built cache; use `Search-Dropbox` for content search.
 
 ### Provider performance — when wildcards use search
 

@@ -21,10 +21,10 @@ Find-DropboxConflict [[-Path] <String>] [-Pattern <String>] [-IncludeNonZero] [-
 ## DESCRIPTION
 
 Finds zero-byte (or, with `-IncludeNonZero`, all) "conflicted copy" files under
-a Dropbox subtree by reading the local metadata cache. It delegates to the same
-cache finder as `Find-DropboxItem`, fixing the conflict pattern and the zero-byte
-filter, so it never performs the multi-hour recursive enumeration the old API
-scan required.
+a Dropbox subtree by reading the local metadata cache. It uses the same cache
+name/zero-byte predicate as `Search-Dropbox`, with the conflict pattern and the
+zero-byte filter applied, so it never performs the multi-hour recursive
+enumeration the old API scan required.
 
 Before reading, the cmdlet auto-refreshes the cache from the account delta
 cursor (the shared refresh used by every cache-backed cmdlet): it drains the

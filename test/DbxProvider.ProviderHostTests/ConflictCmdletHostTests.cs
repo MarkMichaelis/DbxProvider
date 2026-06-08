@@ -234,7 +234,7 @@ $matches = @(Find-DropboxConflict -StatePath $statePath)
     {
         // A drive whose cache was never built: there are no persisted entries, so
         // "no conflicts" would be misleading -- the cmdlet should say the cache is
-        // empty instead, matching Find-DropboxItem.
+        // empty instead, matching Search-Dropbox.
         var fake = new FakeDropboxServiceClient(new List<DropboxItem>
         {
             new() { Name = "A", Path = "/A", IsFolder = true },
