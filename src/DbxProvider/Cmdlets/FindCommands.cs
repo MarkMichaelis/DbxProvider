@@ -46,9 +46,14 @@ namespace DbxProvider.Cmdlets
                 return;
             }
 
+            // Stream straight from the cache enumerator and emit as we go, so a
+            // broad pattern (such as the default '*') never materializes the whole
+            // result set in memory. EnumerateItems yields each item once, so no
+            // de-duplication pass is needed here.
             var predicate = BuildNamePredicate(Name, ZeroByteOnly.IsPresent);
-            foreach (var item in cache.FindItems(predicate, startPath))
-                WriteObject(item);
+            foreach (var item in cache.EnumerateItems(startPath))
+                if (predicate(item))
+                    WriteObject(item);
         }
 
         /// <summary>

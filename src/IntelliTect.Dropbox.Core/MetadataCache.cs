@@ -221,10 +221,10 @@ namespace IntelliTect.Dropbox
         }
 
         /// <summary>
-        /// Streams every cached item at or below <paramref name="startPath"/>
-        /// straight from the local database, without contacting Dropbox. Dirty
-        /// resident entries are flushed first so the on-disk view is
-        /// authoritative, then each folder's item list is read and yielded one
+        /// Streams every cached item under <paramref name="startPath"/> (its
+        /// descendants) straight from the local database, without contacting
+        /// Dropbox. Dirty resident entries are flushed first so the on-disk view
+        /// is authoritative, then each folder's item list is read and yielded one
         /// entry at a time -- the full item set (which can be millions of rows)
         /// is never materialized at once. The database lock is taken per entry
         /// and released before any item is yielded, so a consumer may safely
@@ -249,10 +249,10 @@ namespace IntelliTect.Dropbox
         }
 
         /// <summary>
-        /// Returns every cached item at or below <paramref name="startPath"/>
-        /// that satisfies <paramref name="predicate"/>, de-duplicated by path
-        /// (case-insensitive). Reads the local database only; issues no Dropbox
-        /// API calls.
+        /// Returns every cached item under <paramref name="startPath"/> (its
+        /// descendants) that satisfies <paramref name="predicate"/>,
+        /// de-duplicated by path (case-insensitive). Reads the local database
+        /// only; issues no Dropbox API calls.
         /// </summary>
         public List<DropboxItem> FindItems(Func<DropboxItem, bool> predicate, string startPath = "")
         {

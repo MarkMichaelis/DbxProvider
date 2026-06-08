@@ -47,11 +47,25 @@ namespace IntelliTect.Dropbox
             new() { PropertyNameCaseInsensitive = true };
 
         /// <summary>Parses a legacy sidecar, returning <c>null</c> when the input
-        /// is blank or not valid JSON (so a non-legacy file is left untouched).</summary>
+        /// is blank, not valid JSON, or missing the fields a real sidecar always
+        /// carries (a non-empty <see cref="AccountId"/> and <see cref="Cursor"/>).
+        /// The shape check keeps an unrelated JSON file pointed at via
+        /// <c>-StatePath</c> (for example <c>{}</c>) from being mistaken for
+        /// legacy state and archived.</summary>
         public static LegacyConflictScanState? FromJson(string? json)
         {
             if (string.IsNullOrWhiteSpace(json)) return null;
-            try { return JsonSerializer.Deserialize<LegacyConflictScanState>(json!, Options); }
+            try
+            {
+                var state = JsonSerializer.Deserialize<LegacyConflictScanState>(json!, Options);
+                if (state == null
+                    || string.IsNullOrEmpty(state.AccountId)
+                    || string.IsNullOrEmpty(state.Cursor))
+                {
+                    return null;
+                }
+                return state;
+            }
             catch (JsonException) { return null; }
         }
     }
