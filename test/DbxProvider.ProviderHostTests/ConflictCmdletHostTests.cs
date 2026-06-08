@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Management.Automation;
 using System.Text;
+using DbxProvider.Cmdlets;
 using IntelliTect.Dropbox;
 using Xunit;
 
@@ -239,5 +240,53 @@ $matches = @(Find-DropboxConflict)
 
         var warnings = string.Join("\n", ps.Streams.Warning.Select(w => w.Message));
         Assert.Contains("metadata cache is empty", warnings);
+    }
+
+    [Fact]
+    public void FindDropboxConflict_MigratesDefaultTempSidecar_EvenWhenStatePathProvided()
+    {
+        var fake = new FakeDropboxServiceClient(new List<DropboxItem>
+        {
+            new() { Name = "A", Path = "/A", IsFolder = true },
+            new() { Name = "e's conflicted copy.txt", Path = "/A/e's conflicted copy.txt", IsFolder = false, Length = 0 },
+        });
+
+        // The per-account default temp sidecar an older version would have written,
+        // located with the exact production logic the cmdlet uses.
+        var defaultPath = FindDropboxConflictCommand.LegacyDefaultStatePath(
+            "Dbx", "", "*'s conflicted copy*", includeNonZero: false);
+        Directory.CreateDirectory(Path.GetDirectoryName(defaultPath)!);
+        CleanupSidecar(defaultPath); // drop any stale artifacts so the .bak check is exact
+        File.WriteAllText(defaultPath,
+            @"{ ""AccountId"": ""fake-account"", ""Cursor"": ""old"", ""Matches"": {} }");
+
+        // A -StatePath that does NOT exist must not stop the default location from
+        // being migrated.
+        var missingStatePath = Path.Combine(_cacheDir, "does-not-exist.json");
+
+        try
+        {
+            using var ps = NewHost(fake, missingStatePath);
+            ps.AddScript(SetupAndBuild + "Find-DropboxConflict -StatePath $statePath | Out-Null");
+            ps.Invoke();
+
+            Assert.False(ps.HadErrors, Errors(ps));
+            Assert.False(File.Exists(defaultPath), "default temp sidecar should be archived");
+            Assert.True(File.Exists(defaultPath + ".bak"), "default temp sidecar should be archived to .bak");
+        }
+        finally
+        {
+            CleanupSidecar(defaultPath);
+        }
+    }
+
+    private static void CleanupSidecar(string path)
+    {
+        var dir = Path.GetDirectoryName(path);
+        if (dir == null || !Directory.Exists(dir)) return;
+        foreach (var f in Directory.GetFiles(dir, Path.GetFileName(path) + "*"))
+        {
+            try { File.Delete(f); } catch { /* best effort */ }
+        }
     }
 }

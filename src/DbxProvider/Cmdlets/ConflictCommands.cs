@@ -74,14 +74,26 @@ namespace DbxProvider.Cmdlets
 
         /// <summary>Detects and archives an obsolete conflict-scan sidecar (the
         /// pre-cache persisted state) so an upgraded user neither errors nor
-        /// silently loses their saved matches. The sidecar is moved to a unique
-        /// <c>.bak</c>; the cache is now authoritative.</summary>
+        /// silently loses their saved matches. Both locations an older version
+        /// could have used are checked -- the explicit <c>-StatePath</c> (when
+        /// supplied) and the per-account default temp path -- so passing
+        /// <c>-StatePath</c> never leaves the old default sidecar behind. Each is
+        /// moved to a unique <c>.bak</c>; the cache is now authoritative.</summary>
         private void MigrateLegacyStateIfPresent(string startPath)
         {
-            var candidate = !string.IsNullOrWhiteSpace(StatePath)
-                ? StatePath!
-                : LegacyDefaultStatePath(startPath);
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(StatePath) && seen.Add(StatePath!))
+                TryMigrateLegacyState(StatePath!);
 
+            var defaultPath = LegacyDefaultStatePath(startPath);
+            if (seen.Add(defaultPath))
+                TryMigrateLegacyState(defaultPath);
+        }
+
+        /// <summary>Archives a single obsolete sidecar at <paramref name="candidate"/>
+        /// when it exists and parses as legacy state; otherwise leaves it untouched.</summary>
+        private void TryMigrateLegacyState(string candidate)
+        {
             try
             {
                 if (!File.Exists(candidate)) return;
@@ -102,9 +114,17 @@ namespace DbxProvider.Cmdlets
             }
         }
 
-        private string LegacyDefaultStatePath(string startPath)
+        private string LegacyDefaultStatePath(string startPath) =>
+            LegacyDefaultStatePath(DriveName, startPath, Pattern, IncludeNonZero.IsPresent);
+
+        /// <summary>Computes the obsolete per-account default sidecar path
+        /// (<c>%TEMP%\DbxProvider\conflict-scan-&lt;hash&gt;.json</c>) for the
+        /// given finder inputs. Exposed to host tests so they can assert the exact
+        /// legacy location is migrated.</summary>
+        internal static string LegacyDefaultStatePath(
+            string driveName, string startPath, string pattern, bool includeNonZero)
         {
-            var key = $"{DriveName}|{DropboxServiceClient.NormalizePath(startPath)}|{Pattern}|{IncludeNonZero.IsPresent}";
+            var key = $"{driveName}|{DropboxServiceClient.NormalizePath(startPath)}|{pattern}|{includeNonZero}";
             var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "DbxProvider");
             return System.IO.Path.Combine(dir, $"conflict-scan-{ShortHash(key)}.json");
         }
