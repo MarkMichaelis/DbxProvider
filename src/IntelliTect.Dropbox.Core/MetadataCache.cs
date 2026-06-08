@@ -262,7 +262,11 @@ namespace IntelliTect.Dropbox
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var item in EnumerateItems(startPath))
             {
-                if (predicate(item) && seen.Add(item.Path))
+                if (!predicate(item)) continue;
+                // Items with no path cannot be de-duplicated by path; include them
+                // rather than collapsing distinct entries under one empty key (a
+                // corrupt row could yield such an item).
+                if (string.IsNullOrEmpty(item.Path) || seen.Add(item.Path))
                 {
                     results.Add(item);
                 }
