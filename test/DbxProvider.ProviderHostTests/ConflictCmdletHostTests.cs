@@ -10,64 +10,174 @@ using Xunit;
 namespace DbxProvider.ProviderHostTests;
 
 /// <summary>
-/// Functional test that runs the real <c>Find-DropboxConflict</c> cmdlet
+/// Functional tests that run the real <c>Find-DropboxConflict</c> cmdlet
 /// in-process against a Dropbox drive backed by the in-memory fake, proving the
-/// cmdlet wires the scanner, persists state, and emits matches end-to-end.
+/// cmdlet reads conflicts straight from the metadata cache (zero recursive
+/// enumeration), auto-refreshes the cache via the account delta cursor first,
+/// surfaces a rebuild warning when the cursor is rejected, and archives a legacy
+/// state sidecar instead of erroring.
 /// </summary>
-public class ConflictCmdletHostTests
+public class ConflictCmdletHostTests : IDisposable
 {
-    private const string Script = @"
+    private readonly string _cacheDir =
+        Path.Combine(Path.GetTempPath(), "DbxConflictHostTests-" + Guid.NewGuid().ToString("N"));
+
+    public void Dispose()
+    {
+        try { if (Directory.Exists(_cacheDir)) Directory.Delete(_cacheDir, recursive: true); }
+        catch { /* best effort */ }
+    }
+
+    private const string SetupAndBuild = @"
 $ErrorActionPreference = 'Stop'
+$VerbosePreference = 'Continue'
 Import-Module $dllPath
 $prov = Get-PSProvider Dropbox
 $psdrive = [System.Management.Automation.PSDriveInfo]::new('Dbx', $prov, '\', 'fake', $null)
 $dbx = [DbxProvider.Provider.DropboxDriveInfo]::new($psdrive, $fake)
+$opts = [IntelliTect.Dropbox.CacheOptions]::new()
+$opts.RootDirectoryOverride = $cacheDir
+$dbx.InitializeCache('fake-account', 'fake@example.com', $opts)
 $ExecutionContext.SessionState.Drive.New($dbx, 'global') | Out-Null
-
-$matches = @(Find-DropboxConflict -StatePath $statePath)
-[pscustomobject]@{
-    Count       = $matches.Count
-    FirstPath   = ($matches | Select-Object -First 1).Path
-    StateExists = (Test-Path -LiteralPath $statePath)
-}
+Build-DropboxCache -Path '/' | Out-Null
 ";
 
-    [Fact]
-    public void FindDropboxConflict_ColdRun_EmitsZeroByteMatch_AndSavesState()
+    private PowerShell NewHost(FakeDropboxServiceClient fake, string statePath = "")
     {
-        var items = new List<DropboxItem>
+        var ps = PowerShell.Create();
+        ps.Runspace.SessionStateProxy.SetVariable("fake", fake);
+        ps.Runspace.SessionStateProxy.SetVariable("dllPath",
+            Path.Combine(AppContext.BaseDirectory, "DbxProvider.dll"));
+        ps.Runspace.SessionStateProxy.SetVariable("cacheDir", _cacheDir);
+        ps.Runspace.SessionStateProxy.SetVariable("statePath", statePath);
+        return ps;
+    }
+
+    private static string Errors(PowerShell ps)
+    {
+        var sb = new StringBuilder();
+        foreach (var e in ps.Streams.Error) sb.AppendLine(e.ToString());
+        return sb.ToString();
+    }
+
+    [Fact]
+    public void FindDropboxConflict_ReadsCache_EmitsZeroByteMatch_WithoutFullEnumeration()
+    {
+        var fake = new FakeDropboxServiceClient(new List<DropboxItem>
         {
+            new() { Name = "A", Path = "/A", IsFolder = true },
             new() { Name = "ok.txt", Path = "/A/ok.txt", IsFolder = false, Length = 10 },
             new() { Name = "report's conflicted copy.docx", Path = "/A/report's conflicted copy.docx", IsFolder = false, Length = 0 },
-        };
-        var fake = new FakeDropboxServiceClient(items);
-        var dllPath = Path.Combine(AppContext.BaseDirectory, "DbxProvider.dll");
-        var statePath = Path.Combine(Path.GetTempPath(), "DbxProviderTests", Guid.NewGuid().ToString("N") + ".json");
+        });
 
-        try
+        using var ps = NewHost(fake);
+        ps.AddScript(SetupAndBuild + @"
+$matches = @(Find-DropboxConflict)
+[pscustomobject]@{ Count = $matches.Count; FirstPath = ($matches | Select-Object -First 1).Path }
+");
+        var results = ps.Invoke();
+
+        Assert.False(ps.HadErrors, Errors(ps));
+        var r = results.Single();
+        Assert.Equal(1, (int)r.Properties["Count"].Value);
+        Assert.Equal("/A/report's conflicted copy.docx", (string)r.Properties["FirstPath"].Value);
+
+        // The build did exactly one recursive listing; the find added none -- it
+        // read the cache, never re-enumerating the tree through the API.
+        Assert.Equal(1, fake.FullListCalls);
+    }
+
+    [Fact]
+    public void FindDropboxConflict_AutoRefresh_PicksUpDeltaAddedConflict_AndReportsCounts()
+    {
+        var fake = new FakeDropboxServiceClient(new List<DropboxItem>
         {
-            using var ps = PowerShell.Create();
-            ps.Runspace.SessionStateProxy.SetVariable("fake", fake);
-            ps.Runspace.SessionStateProxy.SetVariable("dllPath", dllPath);
-            ps.Runspace.SessionStateProxy.SetVariable("statePath", statePath);
-            ps.AddScript(Script);
-            var results = ps.Invoke();
-
-            if (results.Count == 0)
-            {
-                var sb = new StringBuilder("No result returned. PowerShell errors:\n");
-                foreach (var e in ps.Streams.Error) sb.AppendLine(e.ToString());
-                Assert.Fail(sb.ToString());
-            }
-
-            var r = results.Single();
-            Assert.Equal(1, (int)r.Properties["Count"].Value);
-            Assert.Equal("/A/report's conflicted copy.docx", (string)r.Properties["FirstPath"].Value);
-            Assert.True(Convert.ToBoolean(LanguagePrimitives.ConvertTo(r.Properties["StateExists"].Value, typeof(bool))));
-        }
-        finally
+            new() { Name = "A", Path = "/A", IsFolder = true },
+            new() { Name = "normal.txt", Path = "/A/normal.txt", IsFolder = false, Length = 10 },
+        });
+        // The conflict exists ONLY as a pending account delta, so it can be found
+        // only if the cmdlet drains the sync cursor before reading the cache.
+        var delta = new DropboxServiceClient.ListFolderDelta { NewCursor = "sync::2", HasMore = false };
+        delta.AddsOrUpdates.Add(new DropboxItem
         {
-            try { File.Delete(statePath); } catch { /* best effort */ }
-        }
+            Name = "late's conflicted copy.txt",
+            Path = "/A/late's conflicted copy.txt",
+            IsFolder = false,
+            Length = 0,
+        });
+        fake.EnqueueSyncDelta(delta);
+
+        using var ps = NewHost(fake);
+        ps.AddScript(SetupAndBuild + @"
+$matches = @(Find-DropboxConflict)
+[pscustomobject]@{ Count = $matches.Count; FirstPath = ($matches | Select-Object -First 1).Path }
+");
+        var results = ps.Invoke();
+
+        Assert.False(ps.HadErrors, Errors(ps));
+        var r = results.Single();
+        Assert.Equal(1, (int)r.Properties["Count"].Value);
+        Assert.Equal("/A/late's conflicted copy.txt", (string)r.Properties["FirstPath"].Value);
+        Assert.True(fake.ContinueCalls >= 1, "auto-refresh should drain at least one delta page");
+
+        var verbose = string.Join("\n", ps.Streams.Verbose.Select(v => v.Message));
+        Assert.Contains("Refreshed cache:", verbose);
+        Assert.Contains("1 added", verbose);
+    }
+
+    [Fact]
+    public void FindDropboxConflict_AutoRefresh_ResetRequired_WarnsToRebuild()
+    {
+        var fake = new FakeDropboxServiceClient(new List<DropboxItem>
+        {
+            new() { Name = "A", Path = "/A", IsFolder = true },
+            new() { Name = "x's conflicted copy.txt", Path = "/A/x's conflicted copy.txt", IsFolder = false, Length = 0 },
+        });
+        fake.EnqueueSyncDelta(new DropboxServiceClient.ListFolderDelta { ResetRequired = true });
+
+        using var ps = NewHost(fake);
+        ps.AddScript(SetupAndBuild + "Find-DropboxConflict | Out-Null");
+        ps.Invoke();
+
+        Assert.False(ps.HadErrors, Errors(ps));
+        var warnings = string.Join("\n", ps.Streams.Warning.Select(w => w.Message));
+        Assert.Contains("Build-DropboxCacheAll.ps1 -Rebuild", warnings);
+    }
+
+    [Fact]
+    public void FindDropboxConflict_LegacyStateSidecar_IsArchivedToBak_NoError()
+    {
+        var fake = new FakeDropboxServiceClient(new List<DropboxItem>
+        {
+            new() { Name = "A", Path = "/A", IsFolder = true },
+            new() { Name = "c's conflicted copy.txt", Path = "/A/c's conflicted copy.txt", IsFolder = false, Length = 0 },
+        });
+
+        var statePath = Path.Combine(_cacheDir, "legacy.state.json");
+        Directory.CreateDirectory(_cacheDir);
+        const string legacyJson = @"{
+  ""AccountId"": ""fake-account"",
+  ""StartPath"": """",
+  ""Pattern"": ""*'s conflicted copy*"",
+  ""IncludeNonZero"": false,
+  ""Cursor"": ""old-cursor-xyz"",
+  ""Matches"": { ""/a/legacy's conflicted copy.txt"": { ""Path"": ""/A/legacy's conflicted copy.txt"", ""Bytes"": 0 } }
+}";
+        File.WriteAllText(statePath, legacyJson);
+
+        using var ps = NewHost(fake, statePath);
+        ps.AddScript(SetupAndBuild + @"
+$matches = @(Find-DropboxConflict -StatePath $statePath)
+[pscustomobject]@{ Count = $matches.Count }
+");
+        var results = ps.Invoke();
+
+        Assert.False(ps.HadErrors, Errors(ps));
+        Assert.Equal(1, (int)results.Single().Properties["Count"].Value);
+
+        // The obsolete sidecar is archived (data preserved), not left in place.
+        Assert.False(File.Exists(statePath), "legacy sidecar should be moved aside");
+        Assert.True(File.Exists(statePath + ".bak"), "legacy sidecar should be archived to .bak");
+        Assert.Contains("legacy", File.ReadAllText(statePath + ".bak"));
     }
 }
