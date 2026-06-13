@@ -126,6 +126,23 @@ $ExecutionContext.SessionState.Drive.New($dbx, 'global') | Out-Null
     }
 
     [Fact]
+    public void SearchDropbox_PipedToSelectFirst_StopsCleanly_WithoutError()
+    {
+        var fake = new FakeDropboxServiceClient(Tree());
+        using var ps = NewHost(fake);
+        // Select-Object -First stops the upstream pipeline once it has its N
+        // objects. The cmdlet streams matches with WriteObject, which then throws
+        // PipelineStoppedException; the cmdlet must let that cooperative stop
+        // propagate rather than swallowing it into a WriteError. Tree() has five
+        // names matching '*', so -First 2 stops the pipeline before exhaustion.
+        ps.AddScript(SetupAndBuild + "Search-Dropbox '*' | Select-Object -First 2");
+        var results = ps.Invoke();
+
+        Assert.False(ps.HadErrors, Errors(ps));
+        Assert.Equal(2, results.Count);
+    }
+
+    [Fact]
     public void SearchDropbox_NoSyncCursor_CapturesBaseline_WithoutDraining()
     {
         // No Build -> the cache is empty and has never captured a sync cursor.
