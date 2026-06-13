@@ -89,6 +89,15 @@ namespace DbxProvider.Cmdlets
                 else
                     SearchCache();
             }
+            catch (PipelineStoppedException)
+            {
+                // A downstream cmdlet stopped the pipeline early (e.g.
+                // Select-Object -First) or the user pressed Ctrl+C. This is a
+                // cooperative stop, not a search failure: let it propagate so the
+                // already-emitted objects are preserved instead of being discarded
+                // and turned into a spurious "The pipeline has been stopped" error.
+                throw;
+            }
             catch (Exception ex)
             {
                 WriteError(new ErrorRecord(ex, "SearchFailed",
