@@ -14,8 +14,8 @@ Deletes many Dropbox items in a single batched API call.
 ## SYNTAX
 
 ```
-Remove-DropboxItemBatch [-Path] <String[]> [-DriveName <String>] [-ProgressAction <ActionPreference>] [-WhatIf]
- [-Confirm] [<CommonParameters>]
+Remove-DropboxItemBatch [-Path] <String[]> [-DriveName <String>] [-SkipCacheUpdate]
+ [-ProgressAction <ActionPreference>] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
 ## DESCRIPTION
@@ -77,8 +77,25 @@ Accept pipeline input: True (ByValue)
 Accept wildcard characters: False
 ```
 
-### -ProgressAction
+### -SkipCacheUpdate
 
+Leaves the local metadata cache untouched after deleting. By default,
+successfully deleted items are removed from the drive's cache so a later
+cache-mode `Search-Dropbox` no longer lists them.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ProgressAction
 Standard PowerShell common parameter that controls how progress records
 are reported. See [about_CommonParameters](https://learn.microsoft.com/powershell/module/microsoft.powershell.core/about/about_commonparameters).
 
