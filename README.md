@@ -122,6 +122,7 @@ Notes:
     flag is unset. It is a real `DropboxItem.Mode` property, so you can filter
     on it -- e.g. `dir Dbx:\ -Recurse | Where-Object Mode -match 'x'` lists
     conflicted copies. Example: a zero-byte conflicted copy renders `----zx`.
+    Review the full legend any time with `Get-Help about_DbxProvider_Mode`.
 - The DLL is loaded directly from `bin\`; nothing is copied.
 - That pwsh process now **locks** the DLL until it exits — the next
   `dotnet build` will fail until you close the session (or run

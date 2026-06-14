@@ -1,0 +1,70 @@
+TOPIC
+    about_DbxProvider_Mode
+
+SHORT DESCRIPTION
+    Explains the Mode flag-mask column shown for items on a Dbx: drive.
+
+LONG DESCRIPTION
+    Get-ChildItem on a Dbx: drive renders a Mode column for every item,
+    mirroring the FileSystem provider's Mode column. It is a fixed-position
+    6-character flag mask backed by the real DropboxItem.Mode property, so you
+    can both read it and filter on it.
+
+    Each position is either its flag letter (set) or a dash (unset):
+
+        Position  Flag  Meaning
+        --------  ----  ------------------------------------------------
+        1         d     Folder (the item is a directory)
+        2         s     Shared (a shared folder, an item that lives under
+                        one, or an item with explicit shared members)
+        3         l     Symlink (the item is a symbolic link)
+        4         c     Cloud-only (not downloadable, e.g. a Google Doc
+                        or a Dropbox Paper doc)
+        5         z     Zero-byte (a file whose length is 0 bytes)
+        6         x     Conflicted copy (a file whose name contains the
+                        Dropbox conflict token "conflicted copy")
+
+    A dash (-) in any position means that flag is not set. The z and x flags
+    apply to files only; folders never set them.
+
+    Example rendered masks:
+
+        d-----   a plain folder
+        ds----   a shared folder
+        ------   a normal file
+        ----z-   a zero-byte file
+        ---c--   a cloud-only file (Google Doc, Paper, etc.)
+        ----zx   a zero-byte conflicted copy
+
+    Because Mode is a real property, the same letters work with
+    Where-Object for fast filtering.
+
+EXAMPLES
+    List conflicted-copy files anywhere under the drive:
+
+        Get-ChildItem Dbx:\ -Recurse | Where-Object Mode -match 'x'
+
+    List zero-byte files:
+
+        Get-ChildItem Dbx:\ -Recurse | Where-Object Mode -match 'z'
+
+    List shared items:
+
+        Get-ChildItem Dbx:\ -Recurse | Where-Object Mode -match 's'
+
+    List cloud-only files:
+
+        Get-ChildItem Dbx:\ -Recurse | Where-Object Mode -match 'c'
+
+KEYWORDS
+    Mode
+    DropboxItem
+    conflicted copy
+    zero-byte
+    cloud-only
+    shared
+
+SEE ALSO
+    Get-ChildItem
+    Find-DropboxConflict
+    Search-Dropbox
