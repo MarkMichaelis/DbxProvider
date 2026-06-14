@@ -101,6 +101,31 @@ Set-Location ([System.IO.Path]::GetTempPath())
     }
 
     [Fact]
+    public void MoreThanOneThousandPaths_AreChunkedAcrossMultipleBatches()
+    {
+        // Dropbox's delete_batch endpoint caps at 1000 entries per call; sending
+        // more in one request fails ("Error while copying content to a stream").
+        // The cmdlet must split the accumulated paths into <= 1000-entry batches.
+        var tree = new List<DropboxItem> { new() { Name = "Temp", Path = "/Temp", IsFolder = true } };
+        const int count = 1001;
+        for (int i = 0; i < count; i++)
+        {
+            tree.Add(new() { Name = $"f{i}.txt", Path = $"/Temp/f{i}.txt", IsFolder = false, Length = 0 });
+        }
+        var fake = new FakeDropboxServiceClient(tree);
+        using var ps = NewHost(fake);
+        ps.AddScript(Setup +
+            "0..1000 | ForEach-Object { \"/Temp/f$_.txt\" } | Remove-DropboxItemBatch -Confirm:$false");
+        ps.Invoke();
+
+        Assert.False(ps.HadErrors, Errors(ps));
+        Assert.Equal(count, fake.BatchDeletes.Count);
+        // 1001 paths must span at least two batch calls (no single oversized request).
+        Assert.True(fake.BatchInvocations >= 2,
+            $"Expected chunked batches but saw {fake.BatchInvocations} invocation(s).");
+    }
+
+    [Fact]
     public void AlreadyDeletedPath_SurfacesNonTerminatingError()
     {
         var fake = new FakeDropboxServiceClient(Tree());

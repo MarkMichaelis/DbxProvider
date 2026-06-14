@@ -362,12 +362,14 @@ Find-DropboxConflict -Path 'Dbx:\Projects' | Remove-DropboxItemBatch -WhatIf
 Find-DropboxConflict -IncludeNonZero
 ```
 
-`Remove-DropboxItemBatch` deletes its inputs in a single server-side batch and
+`Remove-DropboxItemBatch` deletes its inputs in server-side batches and
 accepts the `DropboxItem` objects from `Search-Dropbox` / `Find-DropboxConflict`
-directly (binding their path), their `.Path` strings, or bare API paths:
+directly (binding their path), their `.Path` strings, or bare API paths. Large
+inputs are split automatically into chunks of 1000 (the Dropbox `delete_batch`
+limit), so deleting thousands of items in one pipeline works:
 
 ```powershell
-# All three forms work; piped items collapse into one batch call.
+# All three forms work; piped items are batched (chunked at 1000 per call).
 Search-Dropbox "*conflicted copy*" -ZeroByteOnly | Remove-DropboxItemBatch
 Find-DropboxConflict | Remove-DropboxItemBatch -WhatIf
 $conflicts.Path | Remove-DropboxItemBatch
