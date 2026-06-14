@@ -87,6 +87,39 @@ namespace DbxProvider.Cmdlets
             return path.Substring(colon + 1);
         }
 
+        /// <summary>
+        /// Emits a Dropbox item to the pipeline with its <c>Path</c> rewritten to a
+        /// drive-qualified provider path (e.g. <c>Dbx:\Folder\file</c>) so the
+        /// object pipes straight into provider-aware cmdlets such as
+        /// <c>Remove-Item</c>, <c>Move-Item</c> and <c>Get-Item</c> from any current
+        /// location -- mirroring how the FileSystem provider's items carry a
+        /// resolvable path. <c>Remove-Item -Path</c> binds an object's <c>Path</c>
+        /// property ahead of <c>PSPath</c>, so a bare API path (<c>/Folder/file</c>)
+        /// would otherwise be rooted against the current PSDrive. The raw Dropbox API
+        /// path is preserved on the <c>DropboxPath</c> note property (and via the
+        /// unchanged <see cref="DropboxItem.FullName"/>).
+        /// </summary>
+        protected void WriteDropboxItem(DropboxItem item)
+        {
+            if (item == null) throw new ArgumentNullException(nameof(item));
+
+            var pso = PSObject.AsPSObject(item);
+            // Preserve the raw API path before shadowing Path so callers that need
+            // the Dropbox-relative form still have it.
+            pso.Properties.Add(new PSNoteProperty("DropboxPath", item.Path));
+            // Shadow the adapted CLR Path with the drive-qualified, Remove-Item-able
+            // value. A PSNoteProperty with the same name takes precedence over the
+            // adapted member for both member access and pipeline binding.
+            pso.Properties.Add(new PSNoteProperty("Path", ToDriveQualifiedPath(item.Path)));
+            WriteObject(pso);
+        }
+
+        /// <summary>Converts a Dropbox API path (<c>/Folder/file</c>) to a
+        /// drive-qualified provider path for this cmdlet's drive
+        /// (<c>Dbx:\Folder\file</c>). The inverse of <see cref="StripDrivePrefix"/>.</summary>
+        internal string ToDriveQualifiedPath(string apiPath) =>
+            DriveName + ":" + (apiPath ?? string.Empty).Replace('/', '\\');
+
         /// <summary>Reports whether a query string contains a PowerShell wildcard
         /// metacharacter (<c>*</c>, <c>?</c> or <c>[</c>). Cache-backed finders use
         /// this to auto-detect intent: a query with a wildcard is matched as a glob,

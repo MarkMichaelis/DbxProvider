@@ -80,7 +80,7 @@ $ExecutionContext.SessionState.Drive.New($dbx, 'global') | Out-Null
         var results = ps.Invoke();
 
         Assert.False(ps.HadErrors, Errors(ps));
-        Assert.Equal(new[] { "/A/B/alpha.md", "/A/alpha.txt" }, Paths(results));
+        Assert.Equal(new[] { @"Dbx:\A\B\alpha.md", @"Dbx:\A\alpha.txt" }, Paths(results));
 
         // Build did one recursive listing; the search added none (pure cache read).
         Assert.Equal(1, fake.FullListCalls);
@@ -97,7 +97,7 @@ $ExecutionContext.SessionState.Drive.New($dbx, 'global') | Out-Null
         var results = ps.Invoke();
 
         Assert.False(ps.HadErrors, Errors(ps));
-        Assert.Equal(new[] { "/A/B/alpha.md", "/A/alpha.txt" }, Paths(results));
+        Assert.Equal(new[] { @"Dbx:\A\B\alpha.md", @"Dbx:\A\alpha.txt" }, Paths(results));
     }
 
     [Fact]
@@ -109,7 +109,7 @@ $ExecutionContext.SessionState.Drive.New($dbx, 'global') | Out-Null
         var results = ps.Invoke();
 
         Assert.False(ps.HadErrors, Errors(ps));
-        Assert.Equal(new[] { "/A/B/alpha.md" }, Paths(results));
+        Assert.Equal(new[] { @"Dbx:\A\B\alpha.md" }, Paths(results));
     }
 
     [Fact]
@@ -122,7 +122,7 @@ $ExecutionContext.SessionState.Drive.New($dbx, 'global') | Out-Null
 
         Assert.False(ps.HadErrors, Errors(ps));
         // beta.log (0) and alpha.md (0); alpha.txt (10) excluded; folders excluded.
-        Assert.Equal(new[] { "/A/B/alpha.md", "/A/beta.log" }, Paths(results));
+        Assert.Equal(new[] { @"Dbx:\A\B\alpha.md", @"Dbx:\A\beta.log" }, Paths(results));
     }
 
     [Fact]

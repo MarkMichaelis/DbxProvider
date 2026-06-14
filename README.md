@@ -330,6 +330,11 @@ Search-Dropbox "Q4*.xlsx" -Path /Finance/2025
 # Restrict to zero-byte files (cache mode only)
 Search-Dropbox "*" -ZeroByteOnly | Measure-Object
 
+# Results carry a drive-qualified Dbx:\ path, so they pipe straight into
+# Remove-Item (and other provider cmdlets) from any location:
+Search-Dropbox "*conflicted copy*" -ZeroByteOnly | Remove-Item
+# The raw Dropbox API path (/Folder/file) is preserved on the DropboxPath property.
+
 # Server-side search_v2 (-NoCache): matches file CONTENTS and supports the
 # server-side filters below.
 Search-Dropbox "quarterly report" -NoCache

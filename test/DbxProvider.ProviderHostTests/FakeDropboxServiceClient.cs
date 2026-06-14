@@ -198,4 +198,33 @@ public class FakeDropboxServiceClient : DropboxServiceClient
         var norm = NormalizePath(path);
         return Task.FromResult(string.IsNullOrEmpty(norm) || _items.Any(i => i.Path == norm));
     }
+
+    /// <summary>Records every single-item delete (normalized path) and removes the
+    /// item from the in-memory store so tests can assert what <c>Remove-Item</c>
+    /// routed to Dropbox.</summary>
+    public List<string> Deletes { get; } = new();
+
+    public override Task DeleteAsync(string path, CancellationToken cancellationToken = default)
+    {
+        var norm = NormalizePath(path);
+        Deletes.Add(norm);
+        _items.RemoveAll(i => i.Path == norm);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Records every batch delete as the normalized paths it received so
+    /// tests can assert that drive-qualified inputs were stripped before the API
+    /// call.</summary>
+    public List<string> BatchDeletes { get; } = new();
+
+    public override Task DeleteBatchAsync(IEnumerable<string> paths, CancellationToken cancellationToken = default)
+    {
+        foreach (var p in paths)
+        {
+            var norm = NormalizePath(p);
+            BatchDeletes.Add(norm);
+            _items.RemoveAll(i => i.Path == norm);
+        }
+        return Task.CompletedTask;
+    }
 }

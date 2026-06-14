@@ -127,7 +127,7 @@ namespace DbxProvider.Cmdlets
             foreach (var item in cache.EnumerateItems(startPath))
                 if (predicate(item))
                 {
-                    WriteObject(item);
+                    WriteDropboxItem(item);
                     count++;
                 }
 
