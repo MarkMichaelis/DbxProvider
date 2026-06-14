@@ -362,6 +362,20 @@ Find-DropboxConflict -Path 'Dbx:\Projects' | Remove-DropboxItemBatch -WhatIf
 Find-DropboxConflict -IncludeNonZero
 ```
 
+`Remove-DropboxItemBatch` deletes its inputs in a single server-side batch and
+accepts the `DropboxItem` objects from `Search-Dropbox` / `Find-DropboxConflict`
+directly (binding their path), their `.Path` strings, or bare API paths:
+
+```powershell
+# All three forms work; piped items collapse into one batch call.
+Search-Dropbox "*conflicted copy*" -ZeroByteOnly | Remove-DropboxItemBatch
+Find-DropboxConflict | Remove-DropboxItemBatch -WhatIf
+$conflicts.Path | Remove-DropboxItemBatch
+```
+
+Paths the server cannot delete (for example an already-deleted file) are reported
+as non-terminating errors -- they are no longer silently counted as successes.
+
 `Search-Dropbox` (cache mode) and `Find-DropboxConflict` read the local SQLite
 metadata cache instead of enumerating the Dropbox API, so they return in seconds
 even on accounts with millions of items. Both auto-refresh the cache from the

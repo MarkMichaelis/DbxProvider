@@ -217,14 +217,24 @@ public class FakeDropboxServiceClient : DropboxServiceClient
     /// call.</summary>
     public List<string> BatchDeletes { get; } = new();
 
-    public override Task DeleteBatchAsync(IEnumerable<string> paths, CancellationToken cancellationToken = default)
+    /// <summary>Counts how many times a batch delete was issued, so tests can prove
+    /// piped inputs are accumulated into a single batch rather than one call each.</summary>
+    public int BatchInvocations { get; private set; }
+
+    public override Task<IReadOnlyList<DropboxBatchDeleteError>> DeleteBatchAsync(
+        IEnumerable<string> paths, CancellationToken cancellationToken = default)
     {
+        BatchInvocations++;
+        var failures = new List<DropboxBatchDeleteError>();
         foreach (var p in paths)
         {
             var norm = NormalizePath(p);
             BatchDeletes.Add(norm);
-            _items.RemoveAll(i => i.Path == norm);
+            if (_items.RemoveAll(i => i.Path == norm) == 0)
+            {
+                failures.Add(new DropboxBatchDeleteError(norm, "path not found"));
+            }
         }
-        return Task.CompletedTask;
+        return Task.FromResult<IReadOnlyList<DropboxBatchDeleteError>>(failures);
     }
 }

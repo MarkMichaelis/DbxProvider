@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Management.Automation;
@@ -135,30 +136,81 @@ namespace DbxProvider.Cmdlets
     }
 
     /// <summary>Performs batch delete operations in Dropbox.</summary>
+    /// <remarks>
+    /// <para><c>-Path</c> accepts bare API paths (<c>/Folder/file</c>),
+    /// drive-qualified provider paths (<c>Dbx:\Folder\file</c>), or the
+    /// <c>DropboxItem</c> objects emitted by <c>Search-Dropbox</c> -- so both
+    /// <c>$items | Remove-DropboxItemBatch</c> and
+    /// <c>$items.Path | Remove-DropboxItemBatch</c> work.</para>
+    /// <para>All piped inputs are accumulated and deleted in a single batch
+    /// call. Items the server could not delete (for example an already-deleted
+    /// path) are reported as non-terminating errors rather than silently
+    /// treated as successes.</para>
+    /// </remarks>
     [Cmdlet(VerbsCommon.Remove, "DropboxItemBatch", SupportsShouldProcess = true)]
     public class RemoveDropboxItemBatchCommand : DropboxCmdletBase
     {
+        /// <summary>The items or paths to delete.</summary>
+        /// <summary>The items or paths to delete.</summary>
         [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)]
-        public string[] Path { get; set; } = Array.Empty<string>();
+        public object[] Path { get; set; } = Array.Empty<object>();
 
+        private readonly List<string> _paths = new();
+
+        /// <summary>Accumulates each piped item's path for a single batch delete.</summary>
         protected override void ProcessRecord()
         {
+            foreach (var raw in Path)
+            {
+                var path = ExtractPath(raw);
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    _paths.Add(StripDrivePrefix(path));
+                }
+            }
+        }
+
+        /// <summary>Deletes every accumulated path in one batch and reports failures.</summary>
+        protected override void EndProcessing()
+        {
+            if (_paths.Count == 0) return;
             try
             {
-                if (ShouldProcess(string.Join(", ", Path), "Batch delete"))
+                if (!ShouldProcess(string.Join(", ", _paths), "Batch delete")) return;
+
+                var service = GetService();
+                var failures = Run(ct => service.DeleteBatchAsync(_paths, cancellationToken: ct));
+                foreach (var failure in failures)
                 {
-                    var service = GetService();
-                    // Accept drive-qualified paths (e.g. the Dbx:\... values emitted
-                    // by Search-Dropbox) as well as bare API paths.
-                    var paths = Path.Select(StripDrivePrefix).ToArray();
-                    Run(ct => service.DeleteBatchAsync(paths, cancellationToken: ct));
-                    WriteVerbose($"Batch deleted {paths.Length} items");
+                    WriteError(new ErrorRecord(
+                        new InvalidOperationException($"Could not delete '{failure.Path}': {failure.Reason}"),
+                        "DeleteBatchEntryFailed", ErrorCategory.WriteError, failure.Path));
                 }
+                WriteVerbose($"Batch deleted {_paths.Count - failures.Count} of {_paths.Count} items");
             }
             catch (Exception ex) when (ex is not PipelineStoppedException)
             {
                 WriteError(new ErrorRecord(ex, "DeleteBatchFailed",
                     ErrorCategory.WriteError, null));
+            }
+        }
+
+        private static string ExtractPath(object raw)
+        {
+            switch (raw)
+            {
+                case null:
+                    return string.Empty;
+                case string s:
+                    return s;
+                case DropboxItem item:
+                    return item.Path;
+                case PSObject pso:
+                    if (pso.Properties["DropboxPath"]?.Value is string dbx && dbx.Length > 0) return dbx;
+                    if (pso.Properties["Path"]?.Value is string path) return path;
+                    return pso.BaseObject?.ToString() ?? string.Empty;
+                default:
+                    return raw.ToString() ?? string.Empty;
             }
         }
     }

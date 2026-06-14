@@ -920,24 +920,66 @@ namespace IntelliTect.Dropbox
             return new List<DropboxItem>();
         }
 
-        public virtual Task DeleteBatchAsync(IEnumerable<string> paths, CancellationToken cancellationToken = default) =>
+        /// <summary>
+        /// Deletes the given paths in a single batch and returns the entries the
+        /// server could not delete. An empty list means every path was deleted.
+        /// </summary>
+        public virtual Task<IReadOnlyList<DropboxBatchDeleteError>> DeleteBatchAsync(
+            IEnumerable<string> paths, CancellationToken cancellationToken = default) =>
             RetryAsync(_ => DeleteBatchCoreAsync(paths), cancellationToken);
 
-        private async Task DeleteBatchCoreAsync(IEnumerable<string> paths)
+        private async Task<IReadOnlyList<DropboxBatchDeleteError>> DeleteBatchCoreAsync(IEnumerable<string> paths)
         {
-            var entries = paths.Select(p => new DeleteArg(NormalizePath(p))).ToList();
-            var result = await _client.Files.DeleteBatchAsync(entries);
-            if (result.IsAsyncJobId)
+            var normalized = paths.Select(NormalizePath).ToList();
+            var entries = normalized.Select(p => new DeleteArg(p)).ToList();
+            var launch = await _client.Files.DeleteBatchAsync(entries);
+
+            DeleteBatchResult result;
+            if (launch.IsAsyncJobId)
             {
-                var jobId = result.AsAsyncJobId.Value;
-                while (true)
-                {
-                    await Task.Delay(500);
-                    var check = await _client.Files.DeleteBatchCheckAsync(jobId);
-                    if (check.IsComplete) break;
-                    if (check.IsFailed) throw new Exception("Batch delete failed.");
-                }
+                result = await PollDeleteBatchAsync(launch.AsAsyncJobId.Value);
             }
+            else if (launch.IsComplete)
+            {
+                result = launch.AsComplete.Value;
+            }
+            else
+            {
+                return new List<DropboxBatchDeleteError>();
+            }
+
+            return CollectDeleteFailures(normalized, result);
+        }
+
+        private async Task<DeleteBatchResult> PollDeleteBatchAsync(string jobId)
+        {
+            while (true)
+            {
+                await Task.Delay(500);
+                var check = await _client.Files.DeleteBatchCheckAsync(jobId);
+                if (check.IsComplete) return check.AsComplete.Value;
+                if (check.IsFailed) throw new Exception("Batch delete failed.");
+            }
+        }
+
+        private static IReadOnlyList<DropboxBatchDeleteError> CollectDeleteFailures(
+            IReadOnlyList<string> paths, DeleteBatchResult result)
+        {
+            var failures = new List<DropboxBatchDeleteError>();
+            for (int i = 0; i < result.Entries.Count; i++)
+            {
+                if (!result.Entries[i].IsFailure) continue;
+                var path = i < paths.Count ? paths[i] : string.Empty;
+                failures.Add(new DropboxBatchDeleteError(path, DescribeDeleteError(result.Entries[i].AsFailure.Value)));
+            }
+            return failures;
+        }
+
+        private static string DescribeDeleteError(DeleteError error)
+        {
+            if (error.IsPathLookup && error.AsPathLookup.Value.IsNotFound)
+                return "path not found";
+            return error.ToString();
         }
 
         private async Task<List<DropboxItem>> PollRelocationBatchAsync(
