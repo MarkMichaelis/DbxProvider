@@ -30,7 +30,7 @@
           <TableRowEntry>
             <TableColumnItems>
               <TableColumnItem>
-                <ScriptBlock>if ($_.IsFolder) { "d----" } else { "-a---" }</ScriptBlock>
+                <PropertyName>Mode</PropertyName>
               </TableColumnItem>
               <TableColumnItem>
                 <PropertyName>DisplaySize</PropertyName>

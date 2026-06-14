@@ -55,6 +55,39 @@ namespace IntelliTect.Dropbox
             }
         }
 
+        /// <summary>
+        /// Fixed-position status flags rendered as a 6-character mask (FileSystem
+        /// <c>Mode</c> parity). Position 1: <c>d</c> folder; 2: <c>s</c> shared;
+        /// 3: <c>l</c> symlink; 4: <c>c</c> cloud-only (not downloadable);
+        /// 5: <c>z</c> zero-byte file; 6: <c>x</c> conflicted copy. A dash
+        /// (<c>-</c>) marks an unset flag. Example: a zero-byte conflicted-copy
+        /// file renders as <c>----zx</c>.
+        /// </summary>
+        public string Mode => new string(new[]
+        {
+            IsFolder ? 'd' : '-',
+            IsShared ? 's' : '-',
+            string.IsNullOrEmpty(SymlinkTarget) ? '-' : 'l',
+            IsDownloadable ? '-' : 'c',
+            !IsFolder && Length == 0 ? 'z' : '-',
+            IsConflictedCopy ? 'x' : '-',
+        });
+
+        /// <summary>True when this item is shared, or lives under a shared folder.</summary>
+        public bool IsShared =>
+            !string.IsNullOrEmpty(SharedFolderId) ||
+            !string.IsNullOrEmpty(ParentSharedFolderId) ||
+            HasExplicitSharedMembers;
+
+        /// <summary>
+        /// True when this is a file whose name contains the Dropbox conflict token
+        /// (<c>conflicted copy</c>, case-insensitive) -- the same signal
+        /// <c>Find-DropboxConflict</c> matches on.
+        /// </summary>
+        public bool IsConflictedCopy =>
+            !IsFolder &&
+            Name.IndexOf("conflicted copy", StringComparison.OrdinalIgnoreCase) >= 0;
+
         private static string FormatSize(ulong bytes)
         {
             string[] suffixes = { "B", "KB", "MB", "GB", "TB" };
