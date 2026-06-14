@@ -366,7 +366,10 @@ Find-DropboxConflict -IncludeNonZero
 accepts the `DropboxItem` objects from `Search-Dropbox` / `Find-DropboxConflict`
 directly (binding their path), their `.Path` strings, or bare API paths. Large
 inputs are split automatically into chunks of 1000 (the Dropbox `delete_batch`
-limit), so deleting thousands of items in one pipeline works:
+limit), so deleting thousands of items in one pipeline works. Successfully
+deleted items are also removed from the local metadata cache, so a later
+cache-mode `Search-Dropbox` no longer lists them (pass `-SkipCacheUpdate` to
+leave the cache untouched):
 
 ```powershell
 # All three forms work; piped items are batched (chunked at 1000 per call).

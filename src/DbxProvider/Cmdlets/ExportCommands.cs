@@ -154,6 +154,10 @@ namespace DbxProvider.Cmdlets
         [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)]
         public object[] Path { get; set; } = Array.Empty<object>();
 
+        /// <summary>Skips removing the deleted items from the local metadata cache.</summary>
+        [Parameter]
+        public SwitchParameter SkipCacheUpdate { get; set; }
+
         private readonly List<string> _paths = new();
 
         /// <summary>Accumulates each piped item's path for a single batch delete.</summary>
@@ -179,23 +183,49 @@ namespace DbxProvider.Cmdlets
 
                 var service = GetService();
                 int failureCount = 0;
+                var failedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var chunk in Chunk(_paths, DropboxServiceClient.MaxDeleteBatchSize))
                 {
                     var failures = Run(ct => service.DeleteBatchAsync(chunk, cancellationToken: ct));
                     foreach (var failure in failures)
                     {
                         failureCount++;
+                        failedPaths.Add(failure.Path);
                         WriteError(new ErrorRecord(
                             new InvalidOperationException($"Could not delete '{failure.Path}': {failure.Reason}"),
                             "DeleteBatchEntryFailed", ErrorCategory.WriteError, failure.Path));
                     }
                 }
+                UpdateCache(failedPaths);
                 WriteVerbose($"Batch deleted {_paths.Count - failureCount} of {_paths.Count} items");
             }
             catch (Exception ex) when (ex is not PipelineStoppedException)
             {
                 WriteError(new ErrorRecord(ex, "DeleteBatchFailed",
                     ErrorCategory.WriteError, null));
+            }
+        }
+
+        /// <summary>Removes every successfully-deleted path from the drive's metadata cache.</summary>
+        private void UpdateCache(HashSet<string> failedPaths)
+        {
+            if (SkipCacheUpdate) return;
+            MetadataCache? cache;
+            try
+            {
+                cache = CacheCmdletHelpers.GetCache(this, DriveName);
+            }
+            catch (Exception ex)
+            {
+                WriteVerbose($"Skipping cache update: {ex.Message}");
+                return;
+            }
+            foreach (var path in _paths)
+            {
+                if (!failedPaths.Contains(path))
+                {
+                    cache.ApplyLocalRemove(path);
+                }
             }
         }
 

@@ -68,6 +68,44 @@ Set-Location ([System.IO.Path]::GetTempPath())
     }
 
     [Fact]
+    public void SuccessfulBatchDelete_RemovesItemsFromCache()
+    {
+        // After a batch delete, a cache-mode Search-Dropbox must not still return
+        // the deleted item: the cmdlet must apply the removal to the local cache
+        // (mirroring Remove-Item) so choosing the batch cmdlet never yields stale
+        // results.
+        var fake = new FakeDropboxServiceClient(Tree());
+        using var ps = NewHost(fake);
+        ps.AddScript(Setup +
+            "'/Temp/a (conflicted copy).svg' | Remove-DropboxItemBatch -Confirm:$false; " +
+            "(Search-Dropbox '*conflicted copy*' | ForEach-Object { $_.Path }) -join '|'");
+        var results = ps.Invoke();
+
+        Assert.False(ps.HadErrors, Errors(ps));
+        var joined = results[results.Count - 1]?.ToString() ?? "";
+        Assert.DoesNotContain("a (conflicted copy).svg", joined);
+        // The other conflict file is untouched and still found.
+        Assert.Contains("b (conflicted copy).svg", joined);
+    }
+
+    [Fact]
+    public void SkipCacheUpdate_LeavesCacheEntriesIntact()
+    {
+        // With -SkipCacheUpdate the cache is intentionally left stale, so a
+        // cache-mode search still lists the (server-side deleted) item.
+        var fake = new FakeDropboxServiceClient(Tree());
+        using var ps = NewHost(fake);
+        ps.AddScript(Setup +
+            "'/Temp/a (conflicted copy).svg' | Remove-DropboxItemBatch -SkipCacheUpdate -Confirm:$false; " +
+            "(Search-Dropbox '*conflicted copy*' | ForEach-Object { $_.Path }) -join '|'");
+        var results = ps.Invoke();
+
+        Assert.False(ps.HadErrors, Errors(ps));
+        var joined = results[results.Count - 1]?.ToString() ?? "";
+        Assert.Contains("a (conflicted copy).svg", joined);
+    }
+
+    [Fact]
     public void PipedDropboxItems_BindByPath_AndDeleteInSingleBatch()
     {
         var fake = new FakeDropboxServiceClient(Tree());
