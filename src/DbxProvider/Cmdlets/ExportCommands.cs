@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Management.Automation;
 using IntelliTect.Dropbox;
 
@@ -147,8 +148,11 @@ namespace DbxProvider.Cmdlets
                 if (ShouldProcess(string.Join(", ", Path), "Batch delete"))
                 {
                     var service = GetService();
-                    Run(ct => service.DeleteBatchAsync(Path, cancellationToken: ct));
-                    WriteVerbose($"Batch deleted {Path.Length} items");
+                    // Accept drive-qualified paths (e.g. the Dbx:\... values emitted
+                    // by Search-Dropbox) as well as bare API paths.
+                    var paths = Path.Select(StripDrivePrefix).ToArray();
+                    Run(ct => service.DeleteBatchAsync(paths, cancellationToken: ct));
+                    WriteVerbose($"Batch deleted {paths.Length} items");
                 }
             }
             catch (Exception ex) when (ex is not PipelineStoppedException)

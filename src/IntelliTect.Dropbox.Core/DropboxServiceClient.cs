@@ -356,7 +356,7 @@ namespace IntelliTect.Dropbox
             return MapMetadataToItem(result.Metadata);
         }
 
-        public Task DeleteAsync(string path, CancellationToken cancellationToken = default) =>
+        public virtual Task DeleteAsync(string path, CancellationToken cancellationToken = default) =>
             RetryAsync(_ => DeleteCoreAsync(path), cancellationToken);
 
         private async Task DeleteCoreAsync(string path)
@@ -920,7 +920,7 @@ namespace IntelliTect.Dropbox
             return new List<DropboxItem>();
         }
 
-        public Task DeleteBatchAsync(IEnumerable<string> paths, CancellationToken cancellationToken = default) =>
+        public virtual Task DeleteBatchAsync(IEnumerable<string> paths, CancellationToken cancellationToken = default) =>
             RetryAsync(_ => DeleteBatchCoreAsync(paths), cancellationToken);
 
         private async Task DeleteBatchCoreAsync(IEnumerable<string> paths)
