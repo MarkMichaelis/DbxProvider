@@ -151,7 +151,6 @@ namespace DbxProvider.Cmdlets
     public class RemoveDropboxItemBatchCommand : DropboxCmdletBase
     {
         /// <summary>The items or paths to delete.</summary>
-        /// <summary>The items or paths to delete.</summary>
         [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)]
         public object[] Path { get; set; } = Array.Empty<object>();
 
@@ -170,7 +169,7 @@ namespace DbxProvider.Cmdlets
             }
         }
 
-        /// <summary>Deletes every accumulated path in one batch and reports failures.</summary>
+        /// <summary>Deletes every accumulated path in chunked batches and reports failures.</summary>
         protected override void EndProcessing()
         {
             if (_paths.Count == 0) return;
@@ -179,19 +178,33 @@ namespace DbxProvider.Cmdlets
                 if (!ShouldProcess(string.Join(", ", _paths), "Batch delete")) return;
 
                 var service = GetService();
-                var failures = Run(ct => service.DeleteBatchAsync(_paths, cancellationToken: ct));
-                foreach (var failure in failures)
+                int failureCount = 0;
+                foreach (var chunk in Chunk(_paths, DropboxServiceClient.MaxDeleteBatchSize))
                 {
-                    WriteError(new ErrorRecord(
-                        new InvalidOperationException($"Could not delete '{failure.Path}': {failure.Reason}"),
-                        "DeleteBatchEntryFailed", ErrorCategory.WriteError, failure.Path));
+                    var failures = Run(ct => service.DeleteBatchAsync(chunk, cancellationToken: ct));
+                    foreach (var failure in failures)
+                    {
+                        failureCount++;
+                        WriteError(new ErrorRecord(
+                            new InvalidOperationException($"Could not delete '{failure.Path}': {failure.Reason}"),
+                            "DeleteBatchEntryFailed", ErrorCategory.WriteError, failure.Path));
+                    }
                 }
-                WriteVerbose($"Batch deleted {_paths.Count - failures.Count} of {_paths.Count} items");
+                WriteVerbose($"Batch deleted {_paths.Count - failureCount} of {_paths.Count} items");
             }
             catch (Exception ex) when (ex is not PipelineStoppedException)
             {
                 WriteError(new ErrorRecord(ex, "DeleteBatchFailed",
                     ErrorCategory.WriteError, null));
+            }
+        }
+
+        /// <summary>Splits a list into successive sublists of at most <paramref name="size"/> items.</summary>
+        private static IEnumerable<List<string>> Chunk(List<string> items, int size)
+        {
+            for (int i = 0; i < items.Count; i += size)
+            {
+                yield return items.GetRange(i, Math.Min(size, items.Count - i));
             }
         }
 

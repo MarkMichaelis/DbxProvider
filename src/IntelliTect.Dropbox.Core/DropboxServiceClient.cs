@@ -921,6 +921,12 @@ namespace IntelliTect.Dropbox
         }
 
         /// <summary>
+        /// The maximum number of entries Dropbox's <c>files/delete_batch</c> endpoint
+        /// accepts in a single request. Callers must chunk larger inputs.
+        /// </summary>
+        public const int MaxDeleteBatchSize = 1000;
+
+        /// <summary>
         /// Deletes the given paths in a single batch and returns the entries the
         /// server could not delete. An empty list means every path was deleted.
         /// </summary>
