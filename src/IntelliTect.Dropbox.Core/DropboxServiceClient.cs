@@ -929,21 +929,215 @@ namespace IntelliTect.Dropbox
         /// <summary>
         /// Deletes the given paths in a single batch and returns the entries the
         /// server could not delete. An empty list means every path was deleted.
+        /// <paramref name="onItemsProcessed"/> is invoked (off the calling thread) each
+        /// time a subset of the batch reaches a terminal state -- whether the path was
+        /// deleted or was already gone (a permanent "not found") -- including the
+        /// partial results between transient-lock retries, so callers can show progress
+        /// that advances steadily instead of only when the whole batch finishes. Paths
+        /// that were already deleted by a prior run still count as processed, so the
+        /// bar climbs quickly through manifest regions that are already clear.
         /// </summary>
         public virtual Task<IReadOnlyList<DropboxBatchDeleteError>> DeleteBatchAsync(
-            IEnumerable<string> paths, CancellationToken cancellationToken = default) =>
-            RetryAsync(_ => DeleteBatchCoreAsync(paths), cancellationToken);
+            IEnumerable<string> paths, Action<int>? onItemsProcessed = null,
+            CancellationToken cancellationToken = default) =>
+            RetryAsync(ct => DeleteBatchCoreAsync(paths, onItemsProcessed, ct), cancellationToken);
 
-        private async Task<IReadOnlyList<DropboxBatchDeleteError>> DeleteBatchCoreAsync(IEnumerable<string> paths)
+        /// <summary>
+        /// Deletes many chunks of paths, running up to <paramref name="maxConcurrency"/>
+        /// <c>delete_batch</c> jobs at once. Because each batch is processed
+        /// asynchronously server-side (and polled), overlapping several in-flight
+        /// jobs multiplies throughput. Each chunk should contain at most
+        /// <see cref="MaxDeleteBatchSize"/> paths. Returns the aggregated per-entry
+        /// failures across all chunks; an empty list means every path was deleted.
+        /// <paramref name="onChunkCompleted"/> is invoked (off the calling thread)
+        /// after each chunk finishes, with that chunk's entry count, so callers can
+        /// report incremental progress. <paramref name="onItemsProcessed"/> fires more
+        /// finely -- each time a subset of a chunk reaches a terminal state (deleted or
+        /// already gone), including partial results between transient-lock retries -- so
+        /// a progress bar can climb steadily through the multi-minute server-side wait
+        /// instead of only stepping when a whole chunk completes.
+        /// </summary>
+        public virtual async Task<IReadOnlyList<DropboxBatchDeleteError>> DeleteBatchesAsync(
+            IReadOnlyList<IReadOnlyList<string>> chunks,
+            int maxConcurrency,
+            Action<int>? onChunkCompleted = null,
+            Action<int>? onItemsProcessed = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (chunks is null) throw new ArgumentNullException(nameof(chunks));
+            if (chunks.Count == 0) return Array.Empty<DropboxBatchDeleteError>();
+            if (maxConcurrency < 1) maxConcurrency = 1;
+
+            using var gate = new SemaphoreSlim(maxConcurrency);
+            var failures = new List<DropboxBatchDeleteError>();
+            var failuresLock = new object();
+            var tasks = new List<Task>(chunks.Count);
+
+            foreach (var chunk in chunks)
+            {
+                await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                var local = chunk;
+                tasks.Add(Task.Run(async () =>
+                {
+                    try
+                    {
+                        var chunkFailures = await DeleteBatchAsync(local, onItemsProcessed, cancellationToken).ConfigureAwait(false);
+                        if (chunkFailures.Count > 0)
+                        {
+                            lock (failuresLock) { failures.AddRange(chunkFailures); }
+                        }
+                        onChunkCompleted?.Invoke(local.Count);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        // A whole-chunk error must never abort the other in-flight chunks
+                        // or lose this chunk's paths. Convert it to per-path failures with
+                        // the real paths so the caller records and re-queues them.
+                        lock (failuresLock)
+                        {
+                            foreach (var path in local)
+                            {
+                                failures.Add(new DropboxBatchDeleteError(path, ex.Message));
+                            }
+                        }
+                        onChunkCompleted?.Invoke(local.Count);
+                    }
+                    finally
+                    {
+                        gate.Release();
+                    }
+                }, cancellationToken));
+            }
+
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+            return failures;
+        }
+
+        /// <summary>
+        /// Maximum number of times a single delete batch will re-submit the entries
+        /// that failed with the transient <c>too_many_write_operations</c> lock
+        /// error before giving up and reporting them as failures.
+        /// </summary>
+        private const int MaxTransientDeleteAttempts = 6;
+
+        private static readonly Random _deleteJitter = new Random();
+
+        private Task<IReadOnlyList<DropboxBatchDeleteError>> DeleteBatchCoreAsync(
+            IEnumerable<string> paths, Action<int>? onItemsProcessed, CancellationToken cancellationToken)
         {
             var normalized = paths.Select(NormalizePath).ToList();
-            var entries = normalized.Select(p => new DeleteArg(p)).ToList();
+            return RetryTransientDeletesAsync(
+                normalized, SubmitDeleteBatchAttemptAsync, SystemDelay.Instance, onItemsProcessed, cancellationToken);
+        }
+
+        /// <summary>Outcome of one delete-batch submission: final failures plus the
+        /// paths that hit the transient lock error and are worth re-submitting.</summary>
+        internal readonly struct DeleteAttemptResult
+        {
+            public DeleteAttemptResult(
+                IReadOnlyList<DropboxBatchDeleteError> permanentFailures,
+                IReadOnlyList<string> transientPaths,
+                string? transientReason = null)
+            {
+                PermanentFailures = permanentFailures;
+                TransientPaths = transientPaths;
+                TransientReason = transientReason;
+            }
+
+            public IReadOnlyList<DropboxBatchDeleteError> PermanentFailures { get; }
+            public IReadOnlyList<string> TransientPaths { get; }
+
+            /// <summary>
+            /// Why <see cref="TransientPaths"/> are being retried (e.g. the namespace
+            /// lock error or a whole-job failure). Used to label them accurately if
+            /// they exhaust the retry budget. Null falls back to the lock-error label.
+            /// </summary>
+            public string? TransientReason { get; }
+        }
+
+        /// <summary>
+        /// Re-submits the paths that fail with the transient
+        /// <c>too_many_write_operations</c> lock error (caused by overlapping writes
+        /// on the namespace) with exponential backoff, up to
+        /// <see cref="MaxTransientDeleteAttempts"/> times. Paths still contended after
+        /// the budget are returned as failures so the caller re-queues them on the
+        /// next run -- no special action required. Permanent failures pass straight
+        /// through. <paramref name="onItemsProcessed"/> is invoked after every attempt
+        /// with the number of paths that reached a terminal state in that attempt --
+        /// both successful deletes and permanent failures such as already-gone paths --
+        /// so callers see progress climb as the batch resolves rather than waiting for
+        /// the whole batch. Only the transient remainder being retried is withheld.
+        /// </summary>
+        internal async Task<IReadOnlyList<DropboxBatchDeleteError>> RetryTransientDeletesAsync(
+            IReadOnlyList<string> paths,
+            Func<IReadOnlyList<string>, CancellationToken, Task<DeleteAttemptResult>> submitAttempt,
+            IDelay delay,
+            Action<int>? onItemsProcessed,
+            CancellationToken cancellationToken)
+        {
+            var remaining = paths;
+            var permanentFailures = new List<DropboxBatchDeleteError>();
+            string transientReason = "too_many_write_operations";
+
+            for (int attempt = 1; remaining.Count > 0; attempt++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                int before = remaining.Count;
+                var outcome = await submitAttempt(remaining, cancellationToken).ConfigureAwait(false);
+                permanentFailures.AddRange(outcome.PermanentFailures);
+                if (outcome.TransientReason != null) transientReason = outcome.TransientReason;
+
+                int resolved = before - outcome.TransientPaths.Count;
+                if (resolved > 0) onItemsProcessed?.Invoke(resolved);
+
+                if (outcome.TransientPaths.Count == 0) return permanentFailures;
+
+                if (attempt >= MaxTransientDeleteAttempts)
+                {
+                    foreach (var path in outcome.TransientPaths)
+                    {
+                        permanentFailures.Add(new DropboxBatchDeleteError(path, transientReason));
+                    }
+                    return permanentFailures;
+                }
+
+                var wait = TransientDeleteBackoff(attempt);
+                _rateLimitNotifier?.OnRateLimited(attempt, wait, wait, transientReason);
+                await delay.DelayAsync(wait, cancellationToken).ConfigureAwait(false);
+                remaining = outcome.TransientPaths;
+            }
+
+            return permanentFailures;
+        }
+
+        private async Task<DeleteAttemptResult> SubmitDeleteBatchAttemptAsync(
+            IReadOnlyList<string> paths, CancellationToken cancellationToken)
+        {
+            var entries = paths.Select(p => new DeleteArg(p)).ToList();
             var launch = await _client.Files.DeleteBatchAsync(entries);
 
             DeleteBatchResult result;
             if (launch.IsAsyncJobId)
             {
-                result = await PollDeleteBatchAsync(launch.AsAsyncJobId.Value);
+                try
+                {
+                    result = await PollDeleteBatchAsync(launch.AsAsyncJobId.Value, cancellationToken);
+                }
+                catch (DeleteBatchJobFailedException ex)
+                {
+                    // The whole delete_batch job reported Failed, meaning no entries were
+                    // applied. Re-submit the entire chunk on the transient path so it is
+                    // retried with exponential backoff instead of aborting the window and
+                    // losing the paths. Idempotent: any already-removed entries simply come
+                    // back as benign "not found" on a later attempt. Carry the REAL Dropbox
+                    // reason so an exhausted retry is labeled accurately (contention vs other).
+                    return new DeleteAttemptResult(
+                        Array.Empty<DropboxBatchDeleteError>(), paths, ex.Reason);
+                }
             }
             else if (launch.IsComplete)
             {
@@ -951,34 +1145,75 @@ namespace IntelliTect.Dropbox
             }
             else
             {
-                return new List<DropboxBatchDeleteError>();
+                return new DeleteAttemptResult(Array.Empty<DropboxBatchDeleteError>(), Array.Empty<string>());
             }
 
-            return CollectDeleteFailures(normalized, result);
-        }
-
-        private async Task<DeleteBatchResult> PollDeleteBatchAsync(string jobId)
-        {
-            while (true)
-            {
-                await Task.Delay(500);
-                var check = await _client.Files.DeleteBatchCheckAsync(jobId);
-                if (check.IsComplete) return check.AsComplete.Value;
-                if (check.IsFailed) throw new Exception("Batch delete failed.");
-            }
-        }
-
-        private static IReadOnlyList<DropboxBatchDeleteError> CollectDeleteFailures(
-            IReadOnlyList<string> paths, DeleteBatchResult result)
-        {
-            var failures = new List<DropboxBatchDeleteError>();
+            var permanent = new List<DropboxBatchDeleteError>();
+            var transient = new List<string>();
             for (int i = 0; i < result.Entries.Count; i++)
             {
                 if (!result.Entries[i].IsFailure) continue;
                 var path = i < paths.Count ? paths[i] : string.Empty;
-                failures.Add(new DropboxBatchDeleteError(path, DescribeDeleteError(result.Entries[i].AsFailure.Value)));
+                var error = result.Entries[i].AsFailure.Value;
+                if (error.IsTooManyWriteOperations)
+                {
+                    transient.Add(path);
+                }
+                else
+                {
+                    permanent.Add(new DropboxBatchDeleteError(path, DescribeDeleteError(error)));
+                }
             }
-            return failures;
+
+            return new DeleteAttemptResult(permanent, transient);
+        }
+
+        /// <summary>Exponential backoff with jitter for retrying contended deletes.</summary>
+        private static TimeSpan TransientDeleteBackoff(int attempt)
+        {
+            double seconds = Math.Min(20, Math.Pow(2, attempt - 1));   // 1,2,4,8,16,20...
+            int jitterMs;
+            lock (_deleteJitter) { jitterMs = _deleteJitter.Next(0, 1000); }
+            return TimeSpan.FromSeconds(seconds) + TimeSpan.FromMilliseconds(jitterMs);
+        }
+
+        private async Task<DeleteBatchResult> PollDeleteBatchAsync(string jobId, CancellationToken cancellationToken)
+        {
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+                var check = await _client.Files.DeleteBatchCheckAsync(jobId);
+                if (check.IsComplete) return check.AsComplete.Value;
+                if (check.IsFailed) throw new DeleteBatchJobFailedException(DescribeDeleteBatchError(check.AsFailed.Value));
+            }
+        }
+
+        /// <summary>
+        /// Translates a job-level <see cref="DeleteBatchError"/> (the reason a whole
+        /// <c>delete_batch</c> job ended in the Failed state) into a stable reason string
+        /// so the operator can tell write contention from a genuine fault.
+        /// </summary>
+        internal static string DescribeDeleteBatchError(DeleteBatchError error)
+        {
+            if (error is null) return "batch delete job failed";
+            if (error.IsTooManyWriteOperations) return "too_many_write_operations";
+            return "batch delete job failed";
+        }
+
+        /// <summary>
+        /// Raised when a Dropbox <c>delete_batch</c> job finishes in the Failed state
+        /// (an all-or-nothing job failure where no entries were applied). Caught by the
+        /// submit path, which re-queues the whole chunk for transient retry rather than
+        /// aborting the in-flight delete window. <see cref="Reason"/> carries the real
+        /// Dropbox cause so an exhausted retry is labeled accurately.
+        /// </summary>
+        private sealed class DeleteBatchJobFailedException : Exception
+        {
+            public DeleteBatchJobFailedException(string reason)
+                : base(reason) => Reason = reason;
+
+            public string Reason { get; }
         }
 
         private static string DescribeDeleteError(DeleteError error)

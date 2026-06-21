@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Management.Automation;
+using System.Threading;
 using IntelliTect.Dropbox;
 
 namespace DbxProvider.Cmdlets
@@ -158,6 +159,27 @@ namespace DbxProvider.Cmdlets
         [Parameter]
         public SwitchParameter SkipCacheUpdate { get; set; }
 
+        /// <summary>
+        /// Maximum number of Dropbox <c>delete_batch</c> jobs to run concurrently.
+        /// Each batch is processed asynchronously server-side, so overlapping
+        /// several in-flight jobs multiplies throughput. Defaults to 1 (serial).
+        /// </summary>
+        [Parameter]
+        [ValidateRange(1, 32)]
+        public int MaxConcurrency { get; set; } = 1;
+
+        /// <summary>
+        /// Paths per <c>delete_batch</c> API call. Smaller batches finish (and so
+        /// advance the progress bar) more often, which keeps the bar visibly moving
+        /// during the multi-minute server-side wait. This is independent of
+        /// <see cref="MaxConcurrency"/>: shrinking the batch makes progress finer
+        /// without adding the overlapping writes that cause namespace lock
+        /// contention. Defaults to the <c>delete_batch</c> limit (1000).
+        /// </summary>
+        [Parameter]
+        [ValidateRange(1, DropboxServiceClient.MaxDeleteBatchSize)]
+        public int BatchSize { get; set; } = DropboxServiceClient.MaxDeleteBatchSize;
+
         private readonly List<string> _paths = new();
 
         /// <summary>Accumulates each piped item's path for a single batch delete.</summary>
@@ -184,16 +206,35 @@ namespace DbxProvider.Cmdlets
                 var service = GetService();
                 int failureCount = 0;
                 var failedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var chunk in Chunk(_paths, DropboxServiceClient.MaxDeleteBatchSize))
+
+                void Report(DropboxBatchDeleteError failure)
                 {
-                    var failures = Run(ct => service.DeleteBatchAsync(chunk, cancellationToken: ct));
+                    failureCount++;
+                    failedPaths.Add(failure.Path);
+                    WriteError(new ErrorRecord(
+                        new InvalidOperationException($"Could not delete '{failure.Path}': {failure.Reason}"),
+                        "DeleteBatchEntryFailed", ErrorCategory.WriteError, failure.Path));
+                }
+
+                if (MaxConcurrency > 1)
+                {
+                    var chunks = Chunk(_paths, BatchSize)
+                        .Select(c => (IReadOnlyList<string>)c).ToList();
+                    var failures = RunBatchesWithProgress(service, chunks);
                     foreach (var failure in failures)
                     {
-                        failureCount++;
-                        failedPaths.Add(failure.Path);
-                        WriteError(new ErrorRecord(
-                            new InvalidOperationException($"Could not delete '{failure.Path}': {failure.Reason}"),
-                            "DeleteBatchEntryFailed", ErrorCategory.WriteError, failure.Path));
+                        Report(failure);
+                    }
+                }
+                else
+                {
+                    foreach (var chunk in Chunk(_paths, BatchSize))
+                    {
+                        var failures = Run(ct => service.DeleteBatchAsync(chunk, cancellationToken: ct));
+                        foreach (var failure in failures)
+                        {
+                            Report(failure);
+                        }
                     }
                 }
                 UpdateCache(failedPaths);
@@ -205,6 +246,66 @@ namespace DbxProvider.Cmdlets
                     ErrorCategory.WriteError, null));
             }
         }
+
+        /// <summary>
+        /// Runs the chunked concurrent delete while streaming a live progress bar.
+        /// A one-second timer ticks elapsed time so the bar never looks frozen
+        /// during the long first batch, and each completed batch advances the
+        /// item/batch counts. All UI writes are marshaled to the pipeline thread.
+        /// </summary>
+        private IReadOnlyList<DropboxBatchDeleteError> RunBatchesWithProgress(
+            DropboxServiceClient service, IReadOnlyList<IReadOnlyList<string>> chunks)
+        {
+            int totalChunks = chunks.Count;
+            int totalPaths = _paths.Count;
+            int doneChunks = 0;
+            int donePaths = 0;
+            var started = System.Diagnostics.Stopwatch.StartNew();
+
+            void Emit()
+            {
+                int dc = Volatile.Read(ref doneChunks);
+                int dp = Volatile.Read(ref donePaths);
+                var elapsed = started.Elapsed;
+                var record = new ProgressRecord(
+                    ProgressActivityId, "Removing Dropbox items",
+                    $"{dp:N0}/{totalPaths:N0} processed, {dc}/{totalChunks} batch(es) done -- {elapsed:hh\\:mm\\:ss} elapsed")
+                {
+                    PercentComplete = totalPaths > 0 ? (int)Math.Min(100, 100L * dp / totalPaths) : 0,
+                };
+                EnqueueWrite(() => WriteProgress(record));
+            }
+
+            using var ticker = new System.Threading.Timer(_ => Emit(), null,
+                TimeSpan.Zero, TimeSpan.FromSeconds(1));
+
+            void OnChunk(int n)
+            {
+                Interlocked.Increment(ref doneChunks);
+                Emit();
+            }
+
+            void OnItems(int n)
+            {
+                Interlocked.Add(ref donePaths, n);
+                Emit();
+            }
+
+            try
+            {
+                return Run(ct => service.DeleteBatchesAsync(chunks, MaxConcurrency, OnChunk, OnItems, ct));
+            }
+            finally
+            {
+                ticker.Dispose();
+                WriteProgress(new ProgressRecord(ProgressActivityId, "Removing Dropbox items", "Completed")
+                {
+                    RecordType = ProgressRecordType.Completed,
+                });
+            }
+        }
+
+        private const int ProgressActivityId = 1701;
 
         /// <summary>Removes every successfully-deleted path from the drive's metadata cache.</summary>
         private void UpdateCache(HashSet<string> failedPaths)
