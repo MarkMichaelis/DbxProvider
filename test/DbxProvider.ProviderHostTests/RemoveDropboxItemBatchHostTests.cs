@@ -164,6 +164,31 @@ Set-Location ([System.IO.Path]::GetTempPath())
     }
 
     [Fact]
+    public void BatchSize_ControlsApiCallChunking_IndependentOfConcurrency()
+    {
+        // -BatchSize sets how many paths go in each delete_batch call, decoupled
+        // from -MaxConcurrency. Smaller batches finish (and advance the progress
+        // bar) more often. Six paths at -BatchSize 2 must produce three API calls.
+        // Reverting to the hardcoded 1000-entry chunk size collapses these into a
+        // single call, so this fails for a behavioral reason.
+        var tree = new List<DropboxItem> { new() { Name = "Temp", Path = "/Temp", IsFolder = true } };
+        for (int i = 0; i < 6; i++)
+        {
+            tree.Add(new() { Name = $"c{i}.txt", Path = $"/Temp/c{i}.txt", IsFolder = false, Length = 0 });
+        }
+        var fake = new FakeDropboxServiceClient(tree);
+        using var ps = NewHost(fake);
+        ps.AddScript(Setup +
+            "0..5 | ForEach-Object { \"/Temp/c$_.txt\" } | " +
+            "Remove-DropboxItemBatch -BatchSize 2 -MaxConcurrency 1 -Confirm:$false");
+        ps.Invoke();
+
+        Assert.False(ps.HadErrors, Errors(ps));
+        Assert.Equal(6, fake.BatchDeletes.Count);
+        Assert.Equal(3, fake.BatchInvocations);
+    }
+
+    [Fact]
     public void AlreadyDeletedPath_SurfacesNonTerminatingError()
     {
         var fake = new FakeDropboxServiceClient(Tree());
@@ -178,5 +203,32 @@ Set-Location ([System.IO.Path]::GetTempPath())
         var combined = Errors(ps);
         Assert.Contains("Could not delete", combined);
         Assert.Contains("/Temp/missing.txt", combined);
+    }
+
+    [Fact]
+    public void ConcurrentBatchDelete_StreamsProgressRecords()
+    {
+        // With -MaxConcurrency > 1 the cmdlet runs delete batches concurrently and
+        // must stream a live progress bar so the multi-minute server-side wait is
+        // never silent. Reverting to a plain blocking call (no WriteProgress) emits
+        // zero progress records, so this fails for a behavioral reason.
+        var fake = new FakeDropboxServiceClient(Tree());
+        using var ps = NewHost(fake);
+        ps.AddScript(Setup +
+            "'/Temp/a (conflicted copy).svg','/Temp/b (conflicted copy).svg' | " +
+            "Remove-DropboxItemBatch -MaxConcurrency 2 -Confirm:$false");
+        ps.Invoke();
+
+        Assert.False(ps.HadErrors, Errors(ps));
+        var progress = ps.Streams.Progress
+            .Where(p => p.Activity == "Removing Dropbox items")
+            .ToList();
+        Assert.NotEmpty(progress);
+        // The processed counter must advance to the full count via the fine-grained
+        // per-attempt callback (not only when the whole chunk finishes), so progress is
+        // observable during the wait. Reverting that callback leaves the count at 0.
+        Assert.Contains(progress, p => p.StatusDescription.Contains("2/2 processed"));
+        // The bar must be closed out so it does not linger on the console.
+        Assert.Contains(progress, p => p.RecordType == ProgressRecordType.Completed);
     }
 }

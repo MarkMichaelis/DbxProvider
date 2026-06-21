@@ -74,6 +74,11 @@ namespace DbxProvider.Cmdlets
         private System.Threading.CancellationTokenSource? _stopCts;
 
         /// <summary>
+        /// Activity id for the transient "Connecting to Dropbox..." progress record.
+        /// </summary>
+        private const int ConnectProgressActivityId = 1;
+
+        /// <summary>
         /// Invoked by PowerShell on a separate thread when the pipeline is stopped
         /// (Ctrl+C). Cancels <see cref="_stopCts"/> so the OAuth callback wait and the
         /// app-registration wizard terminate instead of hanging.
@@ -169,8 +174,18 @@ namespace DbxProvider.Cmdlets
                     }
                 }
 
+                // Transient "Connecting to Dropbox..." status. WriteProgress auto-clears
+                // when completed, so the line disappears once we are connected, leaving
+                // only the "Connected to Dropbox as ..." confirmation below.
+                var connectProgress = new ProgressRecord(
+                    ConnectProgressActivityId, "Connecting to Dropbox", "Authenticating...");
+                WriteProgress(connectProgress);
+
                 var account = service.GetCurrentAccountAsync().GetAwaiter().GetResult();
                 WriteVerbose($"Authenticated as {account.DisplayName} ({account.Email})");
+
+                connectProgress.RecordType = ProgressRecordType.Completed;
+                WriteProgress(connectProgress);
 
                 if (ParameterSetName == OAuthSet && !NoSave.IsPresent &&
                     (!string.IsNullOrEmpty(appKey) || !string.IsNullOrEmpty(refreshToken)))
@@ -234,6 +249,12 @@ namespace DbxProvider.Cmdlets
             }
             catch (Exception ex)
             {
+                // Clear any lingering "Connecting to Dropbox..." progress so it does not
+                // remain on screen after a failed connect.
+                WriteProgress(new ProgressRecord(ConnectProgressActivityId, "Connecting to Dropbox", "Failed.")
+                {
+                    RecordType = ProgressRecordType.Completed
+                });
                 ThrowTerminatingError(new ErrorRecord(ex, "ConnectDropboxFailed",
                     ErrorCategory.AuthenticationError, null));
             }

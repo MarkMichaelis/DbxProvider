@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -222,19 +223,24 @@ public class FakeDropboxServiceClient : DropboxServiceClient
     public int BatchInvocations { get; private set; }
 
     public override Task<IReadOnlyList<DropboxBatchDeleteError>> DeleteBatchAsync(
-        IEnumerable<string> paths, CancellationToken cancellationToken = default)
+        IEnumerable<string> paths, Action<int>? onItemsProcessed = null,
+        CancellationToken cancellationToken = default)
     {
         BatchInvocations++;
         var failures = new List<DropboxBatchDeleteError>();
+        int processed = 0;
         foreach (var p in paths)
         {
             var norm = NormalizePath(p);
             BatchDeletes.Add(norm);
             if (_items.RemoveAll(i => i.Path == norm) == 0)
             {
+                // Already gone: a permanent "not found" that still counts as resolved/processed.
                 failures.Add(new DropboxBatchDeleteError(norm, "path not found"));
             }
+            processed++;
         }
+        if (processed > 0) onItemsProcessed?.Invoke(processed);
         return Task.FromResult<IReadOnlyList<DropboxBatchDeleteError>>(failures);
     }
 }

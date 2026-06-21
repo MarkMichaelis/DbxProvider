@@ -15,7 +15,7 @@ Deletes many Dropbox items in a single batched API call.
 
 ```
 Remove-DropboxItemBatch [-Path] <String[]> [-DriveName <String>] [-SkipCacheUpdate]
- [-ProgressAction <ActionPreference>] [-WhatIf] [-Confirm] [<CommonParameters>]
+ [-MaxConcurrency <Int32>] [-BatchSize <Int32>] [-ProgressAction <ActionPreference>] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
 ## DESCRIPTION
@@ -91,6 +91,47 @@ Aliases:
 Required: False
 Position: Named
 Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -MaxConcurrency
+
+Maximum number of Dropbox `delete_batch` jobs to run concurrently. Each
+batch (up to 1000 paths) is processed asynchronously server-side, so
+overlapping several in-flight jobs multiplies throughput. Defaults to 1
+(serial). Range 1-32. Dropbox rate-limit (429) backoff is applied
+automatically to every concurrent job.
+
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 1
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -BatchSize
+
+Number of paths sent in each `delete_batch` API call. Defaults to 1000
+(the Dropbox `delete_batch` limit). Range 1-1000. Smaller batches finish --
+and so advance the progress bar -- more often, which keeps progress visible
+during the multi-minute server-side wait. This is independent of
+`-MaxConcurrency`: shrinking the batch makes progress finer without adding
+the overlapping writes that cause namespace lock contention.
+
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 1000
 Accept pipeline input: False
 Accept wildcard characters: False
 ```

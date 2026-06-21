@@ -276,17 +276,73 @@ namespace DbxProvider.Cmdlets
         private sealed class CmdletRateLimitNotifier : IRateLimitNotifier
         {
             private readonly DropboxCmdletBase _cmdlet;
+            private readonly TransientRetryThrottle _throttle = new();
             public CmdletRateLimitNotifier(DropboxCmdletBase cmdlet) => _cmdlet = cmdlet;
 
             public void OnRateLimited(int attempt, TimeSpan retryAfter, TimeSpan totalWaited, string reason)
             {
                 int seconds = (int)Math.Ceiling(retryAfter.TotalSeconds);
                 int totalSeconds = (int)Math.Ceiling(totalWaited.TotalSeconds);
-                _cmdlet.EnqueueWrite(() => _cmdlet.WriteWarning(
-                    $"Dropbox returned a transient error ({reason}). Waiting {seconds}s before retry. Press Ctrl+C to cancel."));
-                _cmdlet.EnqueueWrite(() => _cmdlet.WriteVerbose(
-                    $"Transient retry: attempt #{attempt} failed ({reason}); waiting {seconds}s; cumulative wait so far {totalSeconds}s."));
+
+                // Transient throttling (too_many_write_operations) is routine during
+                // a large concurrent batch delete and is retried automatically with
+                // backoff -- no user action is needed. Because it needs no action, it
+                // is never surfaced as a warning; it is only emitted under -Verbose for
+                // diagnostics. A throttled heartbeat keeps even the verbose stream from
+                // being buried under one line per retry.
+                if (_throttle.ShouldWarn())
+                {
+                    int suppressed = _throttle.SuppressedSinceLastWarn;
+                    string extra = suppressed > 0
+                        ? $" ({suppressed:N0} similar retries since the last notice)"
+                        : string.Empty;
+                    _cmdlet.EnqueueWrite(() => _cmdlet.WriteVerbose(
+                        $"Dropbox is throttling writes ({reason}); auto-retrying with backoff -- " +
+                        $"this is normal and needs no action.{extra}"));
+                }
+                else
+                {
+                    _cmdlet.EnqueueWrite(() => _cmdlet.WriteVerbose(
+                        $"Transient retry: attempt #{attempt} failed ({reason}); waiting {seconds}s; cumulative wait so far {totalSeconds}s."));
+                }
             }
+        }
+    }
+
+    /// <summary>
+    /// Decides how often the relentless, auto-retried transient-throttle notices
+    /// (<c>too_many_write_operations</c>) should be surfaced as a friendly
+    /// heartbeat versus a terse per-attempt diagnostic. Both are emitted only under
+    /// <c>-Verbose</c> (the retries need no user action, so they are never warnings);
+    /// the heartbeat fires on the first occurrence and then once every
+    /// <see cref="WarnEvery"/> occurrences so a long concurrent batch delete does not
+    /// bury the verbose stream under a wall of identical lines.
+    /// </summary>
+    internal sealed class TransientRetryThrottle
+    {
+        /// <summary>Emit a heartbeat notice on the first occurrence and then once
+        /// per this many occurrences; all others fall through to the terse form.</summary>
+        internal const int WarnEvery = 25;
+
+        private int _count;
+        private int _lastWarnedAt;
+
+        /// <summary>Number of occurrences since the last heartbeat, so the next
+        /// heartbeat can report how many retries it stands in for.</summary>
+        public int SuppressedSinceLastWarn { get; private set; }
+
+        /// <summary>Records one transient retry and returns whether it should be
+        /// surfaced as a heartbeat (true on the 1st, 26th, 51st, ... occurrence).</summary>
+        public bool ShouldWarn()
+        {
+            int n = ++_count;
+            bool warn = n == 1 || (n - _lastWarnedAt) >= WarnEvery;
+            if (warn)
+            {
+                SuppressedSinceLastWarn = n - _lastWarnedAt - 1;
+                _lastWarnedAt = n;
+            }
+            return warn;
         }
     }
 }
