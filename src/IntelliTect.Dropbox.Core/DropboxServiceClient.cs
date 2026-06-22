@@ -1118,7 +1118,24 @@ namespace IntelliTect.Dropbox
             IReadOnlyList<string> paths, CancellationToken cancellationToken)
         {
             var entries = paths.Select(p => new DeleteArg(p)).ToList();
-            var launch = await _client.Files.DeleteBatchAsync(entries);
+
+            DeleteBatchLaunch launch;
+            try
+            {
+                launch = await _client.Files.DeleteBatchAsync(entries);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (IsTransientTransportException(ex))
+            {
+                // A network/transport blip (e.g. HttpRequestException, timeout) on the
+                // submit call applied nothing. Re-queue the whole chunk on the transient
+                // path so it is retried with backoff rather than permanently failed.
+                return new DeleteAttemptResult(
+                    Array.Empty<DropboxBatchDeleteError>(), paths, DescribeTransportError(ex));
+            }
 
             DeleteBatchResult result;
             if (launch.IsAsyncJobId)
@@ -1138,6 +1155,19 @@ namespace IntelliTect.Dropbox
                     return new DeleteAttemptResult(
                         Array.Empty<DropboxBatchDeleteError>(), paths, ex.Reason);
                 }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex) when (IsTransientTransportException(ex))
+                {
+                    // A transient transport fault while polling the job status -- the job may
+                    // still be running server-side, but re-submitting the (idempotent) chunk
+                    // on the transient path is safe and lets the backoff loop recover instead
+                    // of failing the window.
+                    return new DeleteAttemptResult(
+                        Array.Empty<DropboxBatchDeleteError>(), paths, DescribeTransportError(ex));
+                }
             }
             else if (launch.IsComplete)
             {
@@ -1155,17 +1185,66 @@ namespace IntelliTect.Dropbox
                 if (!result.Entries[i].IsFailure) continue;
                 var path = i < paths.Count ? paths[i] : string.Empty;
                 var error = result.Entries[i].AsFailure.Value;
-                if (error.IsTooManyWriteOperations)
+                var reason = DescribeDeleteError(error);
+                if (error.IsTooManyWriteOperations || IsTransientDeleteReason(reason))
                 {
                     transient.Add(path);
                 }
                 else
                 {
-                    permanent.Add(new DropboxBatchDeleteError(path, DescribeDeleteError(error)));
+                    permanent.Add(new DropboxBatchDeleteError(path, reason));
                 }
             }
 
             return new DeleteAttemptResult(permanent, transient);
+        }
+
+        /// <summary>
+        /// Classifies a delete failure reason string as transient (worth retrying
+        /// in-run with backoff) vs permanent. Covers namespace write contention,
+        /// Dropbox server-side internal errors, rate limiting, and transport timeouts.
+        /// </summary>
+        internal static bool IsTransientDeleteReason(string? reason)
+        {
+            if (string.IsNullOrEmpty(reason)) return false;
+            string r = reason!.ToLowerInvariant();
+            return r.Contains("too_many_write_operations")
+                || r.Contains("internal_error")
+                || r.Contains("too_many_requests")
+                || r.Contains("rate_limit")
+                || r.Contains("timed out")
+                || r.Contains("timeout")
+                || r.Contains("temporarily")
+                || r.Contains("service unavailable")
+                || r.Contains("an error occurred while sending the request");
+        }
+
+        /// <summary>
+        /// True when an exception thrown by a delete network call is a transient
+        /// transport fault (network blip, timeout, server 5xx/rate limit) that
+        /// should be retried, rather than a deterministic failure. User-initiated
+        /// cancellation is never transient.
+        /// </summary>
+        internal static bool IsTransientTransportException(Exception ex)
+        {
+            if (ex is null) return false;
+            if (ex is OperationCanceledException) return false;
+            if (ex is System.Net.Http.HttpRequestException) return true;
+            if (ex is TimeoutException) return true;
+            if (ex is System.IO.IOException) return true;
+            string name = ex.GetType().Name;
+            if (name.Contains("RateLimit") || name.Contains("Retry") || name.Contains("ServiceUnavailable"))
+            {
+                return true;
+            }
+            return IsTransientDeleteReason(ex.Message);
+        }
+
+        /// <summary>Builds a stable transient reason label from a transport exception.</summary>
+        private static string DescribeTransportError(Exception ex)
+        {
+            string m = CleanReason(ex?.Message);
+            return m == "unknown error" ? "transient transport error" : m;
         }
 
         /// <summary>Exponential backoff with jitter for retrying contended deletes.</summary>
@@ -1220,7 +1299,21 @@ namespace IntelliTect.Dropbox
         {
             if (error.IsPathLookup && error.AsPathLookup.Value.IsNotFound)
                 return "path not found";
-            return error.ToString();
+            return CleanReason(error.ToString());
+        }
+
+        /// <summary>
+        /// Normalizes a raw SDK reason string for display: trims whitespace and the
+        /// trailing <c>/</c> the Dropbox union <c>ToString()</c> appends for tags with
+        /// no inner value (e.g. <c>internal_error/</c> -> <c>internal_error</c>).
+        /// </summary>
+        internal static string CleanReason(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return "unknown error";
+            string r = raw!.Trim();
+            while (r.EndsWith("/", StringComparison.Ordinal)) r = r.Substring(0, r.Length - 1);
+            r = r.Trim();
+            return r.Length == 0 ? "unknown error" : r;
         }
 
         private async Task<List<DropboxItem>> PollRelocationBatchAsync(
