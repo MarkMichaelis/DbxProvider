@@ -293,6 +293,17 @@ function Stop-StatusLine {
     elseif ($script:InplaceOk -and $script:StatusLastLen -gt 0) { [Console]::Write("`n"); $script:StatusLastLen = 0 }
 }
 
+function Write-StatusWarning {
+    # Surface a warning ABOVE the pinned status line: the ticker clears the live
+    # line (no frozen green snapshot), scrolls the warning up, and keeps one green
+    # status line overwriting at the bottom. Falls back to Write-Warning when no
+    # in-place ticker is active (redirected output or -Verbose).
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Message)
+    if ($script:Ticker) { $script:Ticker.WriteLineAbove("WARNING: $Message", [ConsoleColor]::Yellow) }
+    else { Stop-StatusLine; Write-Warning $Message }
+}
+
 function Split-DeleteError {
     # Parses a Remove-DropboxItemBatch ErrorRecord into Path + Reason, and flags
     # the benign 'path not found' case (the conflict file is already gone -- often
@@ -621,6 +632,25 @@ public sealed class DbxConsoleStatus : IDisposable
         lock (_gate) { if (_lastLen > 0) { Console.Write("\n"); _lastLen = 0; } }
     }
 
+    // Print a message ABOVE the pinned status line: clear the current in-place
+    // line (without leaving a frozen snapshot), write the message followed by a
+    // newline so it scrolls up, then reset so the next status repaint redraws a
+    // fresh pinned line at the bottom. Gate-safe whether or not a wave is active.
+    public void WriteLineAbove(string text, ConsoleColor color)
+    {
+        lock (_gate)
+        {
+            if (_lastLen > 0)
+            {
+                Console.Write("\r" + new string(' ', _lastLen) + "\r");
+                _lastLen = 0;
+            }
+            ConsoleColor prev = Console.ForegroundColor;
+            try { Console.ForegroundColor = color; Console.WriteLine(text); }
+            finally { Console.ForegroundColor = prev; }
+        }
+    }
+
     public void BeginWave(long done, long total, double rate, string eta, string suffix, double runElapsedSeconds)
     {
         lock (_gate)
@@ -781,8 +811,7 @@ try {
                     ('"{0}","{1}"' -f ($parsed.Path -replace '"', '""'), ($parsed.Reason -replace '"', '""')) |
                         Add-Content -LiteralPath $failedCsv -Encoding utf8
                     if ($seenFailureReasons.Add([string]$parsed.Reason)) {
-                        Stop-StatusLine
-                        Write-Warning ("delete failed ({0}); further occurrences are counted on the status line." -f $parsed.Reason)
+                        Write-StatusWarning ("delete failed ({0}); further occurrences are counted on the status line." -f $parsed.Reason)
                     }
                 }
             }
