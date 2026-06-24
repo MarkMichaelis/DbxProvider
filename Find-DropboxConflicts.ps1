@@ -228,6 +228,26 @@ function Format-Duration {
     return ('{0}s' -f [int]$Span.TotalSeconds)
 }
 
+function Format-Eta {
+    # Renders an ETA *TimeSpan* as a target wall-clock time (e.g. '7:05 AM',
+    # 'Thu 2:14 AM', 'Jun 26 1:00 PM'). A target time is preferable to a duration
+    # on a status line that may sit unchanged through a long throttled delete wave:
+    # a duration silently goes stale, whereas a clock time stays correct. A day
+    # qualifier is added once the target crosses midnight so multi-day runs read
+    # unambiguously.
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][TimeSpan]$Span,
+        [datetime]$Now = (Get-Date)
+    )
+
+    $target = $Now + $Span
+    if ($target.Date -eq $Now.Date) { return ('{0:h:mm tt}' -f $target) }
+    if (($target.Date - $Now.Date).TotalDays -lt 7) { return ('{0:ddd h:mm tt}' -f $target) }
+    return ('{0:MMM d h:mm tt}' -f $target)
+}
+
 function Get-StatusWidth {
     # Usable console width for a single-line status. We render to width-1 so the
     # cursor never advances onto a wrapped second row (which would defeat the
@@ -609,7 +629,7 @@ $script:InplaceOk = $inplaceOk
 # is a tiny C# class that owns all in-place console writes: it truncates to the
 # console width (so the line never wraps and the carriage-return overwrite works),
 # locks so the timer thread and the main thread never interleave, and renders a
-# spinner + wave-elapsed clock between waves and the exact totals at each boundary.
+# spinner alongside the exact totals between waves and at each wave boundary.
 $dbxConsoleStatusSource = @'
 using System;
 using System.Diagnostics;
@@ -627,7 +647,6 @@ public sealed class DbxConsoleStatus : IDisposable
     private double _rate;
     private string _eta = "?";
     private string _suffix = "";
-    private double _runBaseSeconds;
 
     public void Start()
     {
@@ -681,13 +700,12 @@ public sealed class DbxConsoleStatus : IDisposable
         }
     }
 
-    public void BeginWave(long done, long total, double rate, string eta, string suffix, double runElapsedSeconds)
+    public void BeginWave(long done, long total, double rate, string eta, string suffix)
     {
         lock (_gate)
         {
             _done = done; _total = total; _rate = rate;
             _eta = eta ?? "?"; _suffix = suffix ?? "";
-            _runBaseSeconds = runElapsedSeconds;
             _wave = Stopwatch.StartNew(); _waveActive = true;
         }
     }
@@ -697,24 +715,16 @@ public sealed class DbxConsoleStatus : IDisposable
         lock (_gate) { _waveActive = false; }
     }
 
-    // Mirrors the PowerShell Format-Duration helper: "Xh YYm" / "Ym ZZs" / "Zs".
-    private static string FormatDuration(TimeSpan span)
-    {
-        if (span.TotalHours >= 1) return string.Format("{0}h {1:00}m", (int)span.TotalHours, span.Minutes);
-        if (span.TotalMinutes >= 1) return string.Format("{0}m {1:00}s", span.Minutes, span.Seconds);
-        return string.Format("{0}s", span.Seconds);
-    }
-
+    // Repaints the pinned status line once per second while a wave is in flight.
     private void Tick()
     {
         lock (_gate)
         {
             if (!_waveActive || _wave == null) return;
             char spin = "|/-\\"[_spin++ % 4];
-            string elapsed = FormatDuration(TimeSpan.FromSeconds(_runBaseSeconds) + _wave.Elapsed);
             string line = string.Format(
-                "[elapsed {0}] {1} deleting conflicts  {2:N0}/{3:N0} deleted   ETA {5} ({4:N0}/min){6}  Press Ctrl+C to cancel.",
-                elapsed, spin, _done, _total, _rate, _eta, _suffix);
+                "{0} deleting conflicts  {1:N0}/{2:N0} deleted   ETA {4} ({3:N0}/min){5}  Press Ctrl+C to cancel.",
+                spin, _done, _total, _rate, _eta, _suffix);
             WriteCore(line, ConsoleColor.Green);
         }
     }
@@ -813,12 +823,12 @@ try {
             $batch | ForEach-Object { Write-Host "  del $_" -ForegroundColor DarkGray }
         }
 
-        # Snapshot cumulative pace so the in-wave ticker shows a live spinner + elapsed
-        # clock alongside the running totals while this blocking wave is in flight.
+        # Snapshot cumulative pace so the in-wave ticker shows a live spinner and the
+        # running totals (with the target-time ETA) while this blocking wave is in flight.
         $rate = if ($runStart.Elapsed.TotalMinutes -gt 0) { $processedThisRun / $runStart.Elapsed.TotalMinutes } else { 0 }
-        $eta = if ($rate -gt 0) { Format-Duration ([TimeSpan]::FromMinutes(($total - $done) / $rate)) } else { '?' }
+        $eta = if ($rate -gt 0) { Format-Eta -Span ([TimeSpan]::FromMinutes(($total - $done) / $rate)) } else { '?' }
         $suffix = Format-FailureSuffix -Total $failed -Transient $transientFailed -Lead '  '
-        if ($script:Ticker) { $script:Ticker.BeginWave($done, $total, $rate, $eta, $suffix, $runStart.Elapsed.TotalSeconds) }
+        if ($script:Ticker) { $script:Ticker.BeginWave($done, $total, $rate, $eta, $suffix) }
 
         $ev = $null
         # The whole window is deleted by ONE blocking call. The cmdlet's own progress
@@ -853,14 +863,14 @@ try {
 
         $remaining = $total - $done
         $rate = if ($runStart.Elapsed.TotalMinutes -gt 0) { $processedThisRun / $runStart.Elapsed.TotalMinutes } else { 0 }
-        $eta = if ($rate -gt 0) { Format-Duration ([TimeSpan]::FromMinutes($remaining / $rate)) } else { '?' }
+        $eta = if ($rate -gt 0) { Format-Eta -Span ([TimeSpan]::FromMinutes($remaining / $rate)) } else { '?' }
         # New failures THIS run are shown inline; already-gone (parent-folder cascade)
         # is folded into the deleted count and reported only in the end summary.
         # Transient throttling faults are shown as "deferred" (auto-retried next run)
         # so the watched line distinguishes a recoverable backlog from real failures.
         $suffix = Format-FailureSuffix -Total $failed -Transient $transientFailed -Lead '   '
-        $statusLine = ("[elapsed {0}] deleted {1,12:N0} / {2:N0} ({3:N0} remaining)   ETA {4} ({5:N0}/min){6}   Press Ctrl+C to cancel." -f `
-                (Format-Duration $runStart.Elapsed), $done, $total, $remaining, $eta, $rate, $suffix)
+        $statusLine = ("deleted {0,12:N0} / {1:N0} ({2:N0} remaining)   ETA {3} ({4:N0}/min){5}   Press Ctrl+C to cancel." -f `
+                $done, $total, $remaining, $eta, $rate, $suffix)
         Show-Status -Text $statusLine -Color Green
 
         if ($Limit -gt 0 -and $processedThisRun -ge $Limit) { break }   # -Limit reached
