@@ -73,6 +73,7 @@ public class DeleteFailureClassificationTests
 
     [Theory]
     [InlineData("internal_error/", "internal_error")]
+    [InlineData("too_many_requests/..", "too_many_requests")]
     [InlineData("  path_write/ ", "path_write")]
     [InlineData("", "unknown error")]
     [InlineData(null, "unknown error")]

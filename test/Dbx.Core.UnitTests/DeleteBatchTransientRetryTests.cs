@@ -33,7 +33,7 @@ public class DeleteBatchTransientRetryTests
         }
     }
 
-    private const int MaxAttempts = 6;
+    private const int MaxAttempts = 10;
 
     [Fact]
     public async Task RetryTransientDeletes_ResubmitsOnlyContendedPaths_UntilTheySucceed()
@@ -202,6 +202,67 @@ public class DeleteBatchTransientRetryTests
         reported.Should().Equal(new[] { 1, 2 },
             "the immediate success is reported as it happens, then the two contended " +
             "paths once they clear -- progress advances per attempt, not all at once");
+    }
+
+    [Fact]
+    public async Task RetryTransientDeletes_HonorsServerRetryAfter_OverExponentialBackoff()
+    {
+        // A 429 carries a Retry-After telling us exactly how long to wait. The first
+        // attempt reports the chunk contended with a 10s Retry-After; the retry must
+        // wait at least that long rather than the ~1s first-step exponential backoff.
+        // Reverting to a blind backoff waits ~1s and fails this behaviorally.
+        var client = new RetryProbeClient();
+        var delay = new RecordingDelay();
+        int call = 0;
+
+        Task<DropboxServiceClient.DeleteAttemptResult> Submit(
+            IReadOnlyList<string> paths, CancellationToken ct)
+        {
+            call++;
+            return Task.FromResult(call == 1
+                ? new DropboxServiceClient.DeleteAttemptResult(
+                    Array.Empty<DropboxBatchDeleteError>(), new[] { "/a" }, "too_many_requests",
+                    TimeSpan.FromSeconds(10))
+                : new DropboxServiceClient.DeleteAttemptResult(
+                    Array.Empty<DropboxBatchDeleteError>(), Array.Empty<string>()));
+        }
+
+        var failures = await client.RetryTransientDeletesAsync(
+            new[] { "/a" }, Submit, delay, null, CancellationToken.None);
+
+        failures.Should().BeEmpty();
+        delay.Waits.Should().ContainSingle();
+        delay.Waits[0].Should().BeGreaterThanOrEqualTo(TimeSpan.FromSeconds(10),
+            "the server Retry-After is honored instead of the ~1s exponential backoff");
+    }
+
+    [Fact]
+    public async Task RetryTransientDeletes_CapsServerRetryAfter_ToAvoidPathologicalStalls()
+    {
+        // A pathological Retry-After must never stall the window for minutes; the wait
+        // is capped at 60s. Reverting the cap lets a 10-minute hint through and fails.
+        var client = new RetryProbeClient();
+        var delay = new RecordingDelay();
+        int call = 0;
+
+        Task<DropboxServiceClient.DeleteAttemptResult> Submit(
+            IReadOnlyList<string> paths, CancellationToken ct)
+        {
+            call++;
+            return Task.FromResult(call == 1
+                ? new DropboxServiceClient.DeleteAttemptResult(
+                    Array.Empty<DropboxBatchDeleteError>(), new[] { "/a" }, "too_many_requests",
+                    TimeSpan.FromMinutes(10))
+                : new DropboxServiceClient.DeleteAttemptResult(
+                    Array.Empty<DropboxBatchDeleteError>(), Array.Empty<string>()));
+        }
+
+        await client.RetryTransientDeletesAsync(
+            new[] { "/a" }, Submit, delay, null, CancellationToken.None);
+
+        delay.Waits.Should().ContainSingle();
+        delay.Waits[0].Should().BeLessThanOrEqualTo(TimeSpan.FromSeconds(60),
+            "a runaway server Retry-After is capped so the delete window keeps moving");
     }
 
     [Fact]

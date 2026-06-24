@@ -1020,9 +1020,15 @@ namespace IntelliTect.Dropbox
         /// <summary>
         /// Maximum number of times a single delete batch will re-submit the entries
         /// that failed with the transient <c>too_many_write_operations</c> lock
-        /// error before giving up and reporting them as failures.
+        /// error before giving up and reporting them as failures. Sized so a chunk
+        /// keeps clearing in-run through a sustained throttling spell instead of
+        /// spilling to the failed sidecar and churning across runs.
         /// </summary>
-        private const int MaxTransientDeleteAttempts = 6;
+        private const int MaxTransientDeleteAttempts = 10;
+
+        /// <summary>Upper bound on a single transient-retry wait, so a pathological
+        /// server-supplied <c>Retry-After</c> can never stall the window for minutes.</summary>
+        private static readonly TimeSpan MaxTransientDeleteWait = TimeSpan.FromSeconds(60);
 
         private static readonly Random _deleteJitter = new Random();
 
@@ -1041,11 +1047,13 @@ namespace IntelliTect.Dropbox
             public DeleteAttemptResult(
                 IReadOnlyList<DropboxBatchDeleteError> permanentFailures,
                 IReadOnlyList<string> transientPaths,
-                string? transientReason = null)
+                string? transientReason = null,
+                TimeSpan? retryAfter = null)
             {
                 PermanentFailures = permanentFailures;
                 TransientPaths = transientPaths;
                 TransientReason = transientReason;
+                RetryAfter = retryAfter;
             }
 
             public IReadOnlyList<DropboxBatchDeleteError> PermanentFailures { get; }
@@ -1057,6 +1065,14 @@ namespace IntelliTect.Dropbox
             /// they exhaust the retry budget. Null falls back to the lock-error label.
             /// </summary>
             public string? TransientReason { get; }
+
+            /// <summary>
+            /// Server-supplied <c>Retry-After</c> hint (from a rate-limit response) for
+            /// the contended paths, when one was provided. The retry loop waits at least
+            /// this long before re-submitting so a 429 honors Dropbox's pacing instead of
+            /// a blind exponential guess. Null means use the default backoff.
+            /// </summary>
+            public TimeSpan? RetryAfter { get; }
         }
 
         /// <summary>
@@ -1105,7 +1121,7 @@ namespace IntelliTect.Dropbox
                     return permanentFailures;
                 }
 
-                var wait = TransientDeleteBackoff(attempt);
+                var wait = TransientDeleteWait(attempt, outcome.RetryAfter);
                 _rateLimitNotifier?.OnRateLimited(attempt, wait, wait, transientReason);
                 await delay.DelayAsync(wait, cancellationToken).ConfigureAwait(false);
                 remaining = outcome.TransientPaths;
@@ -1132,9 +1148,11 @@ namespace IntelliTect.Dropbox
             {
                 // A network/transport blip (e.g. HttpRequestException, timeout) on the
                 // submit call applied nothing. Re-queue the whole chunk on the transient
-                // path so it is retried with backoff rather than permanently failed.
+                // path so it is retried with backoff rather than permanently failed. Carry
+                // any server Retry-After so a 429 waits exactly as long as Dropbox asks.
                 return new DeleteAttemptResult(
-                    Array.Empty<DropboxBatchDeleteError>(), paths, DescribeTransportError(ex));
+                    Array.Empty<DropboxBatchDeleteError>(), paths, DescribeTransportError(ex),
+                    GetRetryAfterHint(ex));
             }
 
             DeleteBatchResult result;
@@ -1164,9 +1182,10 @@ namespace IntelliTect.Dropbox
                     // A transient transport fault while polling the job status -- the job may
                     // still be running server-side, but re-submitting the (idempotent) chunk
                     // on the transient path is safe and lets the backoff loop recover instead
-                    // of failing the window.
+                    // of failing the window. Carry any server Retry-After hint.
                     return new DeleteAttemptResult(
-                        Array.Empty<DropboxBatchDeleteError>(), paths, DescribeTransportError(ex));
+                        Array.Empty<DropboxBatchDeleteError>(), paths, DescribeTransportError(ex),
+                        GetRetryAfterHint(ex));
                 }
             }
             else if (launch.IsComplete)
@@ -1256,6 +1275,34 @@ namespace IntelliTect.Dropbox
             return TimeSpan.FromSeconds(seconds) + TimeSpan.FromMilliseconds(jitterMs);
         }
 
+        /// <summary>
+        /// Resolves the wait before the next transient delete re-submission: the larger
+        /// of the exponential backoff and any server-supplied <c>Retry-After</c>, capped
+        /// at <see cref="MaxTransientDeleteWait"/>. Honoring <c>Retry-After</c> means a 429
+        /// waits exactly as long as Dropbox asked instead of a blind exponential guess.
+        /// </summary>
+        private static TimeSpan TransientDeleteWait(int attempt, TimeSpan? retryAfter)
+        {
+            var wait = TransientDeleteBackoff(attempt);
+            if (retryAfter is TimeSpan ra && ra > wait) wait = ra;
+            if (wait > MaxTransientDeleteWait) wait = MaxTransientDeleteWait;
+            return wait;
+        }
+
+        /// <summary>
+        /// Extracts a server <c>Retry-After</c> hint from a rate-limit exception, when the
+        /// transport surfaced one. Returns null for non-rate-limit faults so the caller
+        /// falls back to exponential backoff.
+        /// </summary>
+        private static TimeSpan? GetRetryAfterHint(Exception ex)
+        {
+            if (ex is RateLimitException rl && rl.RetryAfter > 0)
+            {
+                return TimeSpan.FromSeconds(rl.RetryAfter);
+            }
+            return null;
+        }
+
         private async Task<DeleteBatchResult> PollDeleteBatchAsync(string jobId, CancellationToken cancellationToken)
         {
             while (true)
@@ -1304,14 +1351,19 @@ namespace IntelliTect.Dropbox
 
         /// <summary>
         /// Normalizes a raw SDK reason string for display: trims whitespace and the
-        /// trailing <c>/</c> the Dropbox union <c>ToString()</c> appends for tags with
-        /// no inner value (e.g. <c>internal_error/</c> -> <c>internal_error</c>).
+        /// trailing <c>/</c> and <c>.</c> the Dropbox union <c>ToString()</c> appends for
+        /// tags with no inner value (e.g. <c>internal_error/</c> -> <c>internal_error</c>,
+        /// <c>too_many_requests/..</c> -> <c>too_many_requests</c>).
         /// </summary>
         internal static string CleanReason(string? raw)
         {
             if (string.IsNullOrWhiteSpace(raw)) return "unknown error";
             string r = raw!.Trim();
-            while (r.EndsWith("/", StringComparison.Ordinal)) r = r.Substring(0, r.Length - 1);
+            while (r.Length > 0 &&
+                   (r.EndsWith("/", StringComparison.Ordinal) || r.EndsWith(".", StringComparison.Ordinal)))
+            {
+                r = r.Substring(0, r.Length - 1);
+            }
             r = r.Trim();
             return r.Length == 0 ? "unknown error" : r;
         }

@@ -326,6 +326,32 @@ function Split-DeleteError {
     }
 }
 
+function Test-TransientDeleteReason {
+    # True when a failure reason is a transient throttling/server fault (automatically
+    # retried on the next run) rather than a permanent error needing attention. Mirrors
+    # the Core IsTransientDeleteReason classifier so the summary can distinguish a
+    # throttling backlog (not data loss) from genuine failures.
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([string]$Reason)
+    if ([string]::IsNullOrWhiteSpace($Reason)) { return $false }
+    return [bool]($Reason -match '(?i)too_many_write_operations|too_many_requests|rate_limit|internal_error|timed out|timeout|temporarily|service unavailable|an error occurred while sending the request')
+}
+
+function Format-FailureSuffix {
+    # Renders the live status-line failure tally, separating transient/deferred items
+    # (auto-retried next run) from permanent failures so a throttling backlog does not
+    # read as data loss on the line the operator watches for hours.
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([int]$Total, [int]$Transient, [string]$Lead = '  ')
+    if ($Total -le 0) { return '' }
+    $permanent = $Total - $Transient
+    if ($permanent -le 0) { return ('{0}{1:N0} deferred' -f $Lead, $Transient) }
+    if ($Transient -le 0) { return ('{0}{1:N0} failed' -f $Lead, $permanent) }
+    return ('{0}{1:N0} failed, {2:N0} deferred' -f $Lead, $permanent, $Transient)
+}
+
 function Measure-FileLine {
     # Counts data rows in the manifest (total lines minus the header).
     [CmdletBinding()]
@@ -520,6 +546,10 @@ $gone = 0
 # counter is not pre-seeded with stale carryover from previous runs.
 $priorFailedCount = Measure-FileLine -Path $failedCsv
 $failed = 0
+# Of the NEW failures this run, how many are transient (throttling/server faults that
+# auto-retry next run) vs permanent. Tracked so the status line and summary do not
+# present a recoverable throttling backlog as data loss.
+$transientFailed = 0
 # Each DISTINCT failure reason is surfaced to the console at most once per run; further
 # occurrences are folded into the live "N failed" counter on the status line so a
 # recurring batch error cannot spam warnings that break the in-place line overwrite.
@@ -787,7 +817,7 @@ try {
         # clock alongside the running totals while this blocking wave is in flight.
         $rate = if ($runStart.Elapsed.TotalMinutes -gt 0) { $processedThisRun / $runStart.Elapsed.TotalMinutes } else { 0 }
         $eta = if ($rate -gt 0) { Format-Duration ([TimeSpan]::FromMinutes(($total - $done) / $rate)) } else { '?' }
-        $suffix = if ($failed) { "  {0:N0} failed" -f $failed } else { '' }
+        $suffix = Format-FailureSuffix -Total $failed -Transient $transientFailed -Lead '  '
         if ($script:Ticker) { $script:Ticker.BeginWave($done, $total, $rate, $eta, $suffix, $runStart.Elapsed.TotalSeconds) }
 
         $ev = $null
@@ -804,6 +834,7 @@ try {
                 }
                 else {
                     $failed++
+                    if (Test-TransientDeleteReason $parsed.Reason) { $transientFailed++ }
                     # Record every real failure (with its real path) so it is retried on
                     # the next run. Only the FIRST occurrence of each distinct reason is
                     # printed -- repeats just advance the "N failed" status counter -- so a
@@ -825,7 +856,9 @@ try {
         $eta = if ($rate -gt 0) { Format-Duration ([TimeSpan]::FromMinutes($remaining / $rate)) } else { '?' }
         # New failures THIS run are shown inline; already-gone (parent-folder cascade)
         # is folded into the deleted count and reported only in the end summary.
-        $suffix = if ($failed) { "   {0:N0} failed" -f $failed } else { '' }
+        # Transient throttling faults are shown as "deferred" (auto-retried next run)
+        # so the watched line distinguishes a recoverable backlog from real failures.
+        $suffix = Format-FailureSuffix -Total $failed -Transient $transientFailed -Lead '   '
         $statusLine = ("[elapsed {0}] deleted {1,12:N0} / {2:N0} ({3:N0} remaining)   ETA {4} ({5:N0}/min){6}   Press Ctrl+C to cancel." -f `
                 (Format-Duration $runStart.Elapsed), $done, $total, $remaining, $eta, $rate, $suffix)
         Show-Status -Text $statusLine -Color Green
@@ -855,7 +888,18 @@ Stop-StatusLine
 #   * prior retry  -- how the up-front retry of earlier failures resolved.
 $parts = [System.Collections.Generic.List[string]]::new()
 if ($gone) { $parts.Add(("{0:N0} already removed by earlier parent-folder deletes" -f $gone)) }
-if ($failed) { $parts.Add(("{0:N0} new failure(s) this run -- see {1}" -f $failed, $failedCsv)) }
+if ($failed) {
+    $permanentFailed = $failed - $transientFailed
+    if ($transientFailed -and $permanentFailed -le 0) {
+        $parts.Add(("{0:N0} transient failure(s) this run, deferred for auto-retry next run -- see {1}" -f $transientFailed, $failedCsv))
+    }
+    elseif ($transientFailed) {
+        $parts.Add(("{0:N0} permanent failure(s) and {1:N0} transient (deferred for auto-retry) this run -- see {2}" -f $permanentFailed, $transientFailed, $failedCsv))
+    }
+    else {
+        $parts.Add(("{0:N0} new failure(s) this run -- see {1}" -f $failed, $failedCsv))
+    }
+}
 if ($priorFailures.Count -gt 0) {
     $parts.Add(("prior failures: {0:N0} cleared, {1:N0} still failing" -f $priorCleared, $priorStillFailed))
 }
@@ -870,5 +914,12 @@ else {
 }
 if ($failed -or $priorStillFailed) {
     $outstanding = $failed + $priorStillFailed
-    Write-Host ("{0:N0} item(s) still failing after in-batch retries; recorded in {1} and retried automatically at the start of the next -Delete run (no special action needed)." -f $outstanding, $failedCsv) -ForegroundColor Gray
+    $permanentFailed = $failed - $transientFailed
+    $note = if ($permanentFailed -le 0) {
+        'all transient throttling/server faults -- no action needed'
+    }
+    else {
+        "{0:N0} permanent (review them), the rest transient throttling -- no action needed for those" -f $permanentFailed
+    }
+    Write-Host ("{0:N0} item(s) still pending after in-batch retries ({1}); recorded in {2} and retried automatically at the start of the next -Delete run." -f $outstanding, $note, $failedCsv) -ForegroundColor Gray
 }
