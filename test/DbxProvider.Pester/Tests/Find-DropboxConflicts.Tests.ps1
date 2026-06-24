@@ -53,3 +53,18 @@ Describe 'Find-DropboxConflicts.ps1 Format-Eta' {
             Should -BeExactly 'Jul 3 12:00 PM'
     }
 }
+
+Describe 'Find-DropboxConflicts.ps1 Format-ElapsedTag' {
+
+    It 'renders the run-elapsed time as a bracketed tag without the word elapsed' {
+        # 39m 46s -> '[39m 46s]': brackets convey "time running"; the label is dropped.
+        $tag = Format-ElapsedTag -Span ([TimeSpan]::FromSeconds((39 * 60) + 46))
+        $tag | Should -BeExactly '[39m 46s]'
+        $tag | Should -Not -Match 'elapsed'
+    }
+
+    It 'keeps the running timer present (an hours-scale run is still bracketed)' {
+        Format-ElapsedTag -Span ([TimeSpan]::FromMinutes(150)) |
+            Should -BeExactly '[2h 30m]'
+    }
+}
