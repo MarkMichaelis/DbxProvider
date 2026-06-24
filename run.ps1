@@ -38,9 +38,18 @@
     Launch in a separate visible window that stays open (-NoExit). Without this, the command
     runs in a child process attached to the current console and the window closes when done.
 
+.PARAMETER NewTab
+    Launch in a new Windows Terminal tab (via wt.exe) instead of a separate window, so the run
+    sits alongside the current session. The tab stays open (-NoExit) so the live status line is
+    watchable. Falls back to -NewWindow (with a warning) when wt.exe is unavailable.
+
 .EXAMPLE
     .\run.ps1 -NewWindow
     Builds fresh and opens a separate window so you can watch the live status line.
+
+.EXAMPLE
+    .\run.ps1 -NewTab
+    Builds fresh and opens a new Windows Terminal tab running the live status line.
 
 .EXAMPLE
     .\run.ps1 -Limit 1000 -ScriptArgs '-WhatIf'
@@ -53,10 +62,37 @@ param(
     [switch]   $NoBuild,
     [string]   $ModulePath,
     [string[]] $ScriptArgs,
-    [switch]   $NewWindow
+    [switch]   $NewWindow,
+    [switch]   $NewTab
 )
 
 $ErrorActionPreference = 'Stop'
+
+function New-WtTabArgumentList {
+    # Builds the wt.exe argument list that opens a child pwsh in a new Windows Terminal
+    # tab. '-w 0' targets the current Windows Terminal window (creating one if none is
+    # open); 'new-tab' adds a fresh tab there. Paths are quoted so spaces survive wt's
+    # own command-line parsing. The child is launched via -File (not -Command) so the
+    # status-line script's embedded ';' is never reinterpreted as a wt action delimiter.
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory)][string]$PwshPath,
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [Parameter(Mandatory)][string]$Title
+    )
+
+    return @(
+        '-w', '0',
+        'new-tab', '--title', $Title,
+        ('"{0}"' -f $PwshPath),
+        '-NoExit', '-NoProfile',
+        '-File', ('"{0}"' -f $ScriptPath)
+    )
+}
+
+# When dot-sourced (e.g. by Pester) load the helpers above but skip execution.
+if ($MyInvocation.InvocationName -eq '.') { return }
 
 $repoRoot = $PSScriptRoot
 $script = Join-Path $repoRoot 'Find-DropboxConflicts.ps1'
@@ -123,6 +159,31 @@ $command = "Set-Location -LiteralPath `"$repoRoot`"; & `"$script`" -ModulePath `
 
 $pwsh = (Get-Process -Id $PID).Path   # use the same pwsh executable that's running this script
 $baseArgs = @('-NoProfile', '-Command', $command)
+
+if ($NewTab) {
+    $wt = Get-Command wt.exe -ErrorAction SilentlyContinue
+    if ($wt) {
+        # wt parses ';' as an action delimiter, so hand the child a temp -File script
+        # (no embedded ';' on the wt command line) rather than an inline -Command.
+        if (-not (Test-Path -LiteralPath $runBuildRoot)) {
+            New-Item -ItemType Directory -Path $runBuildRoot -Force | Out-Null
+        }
+        $tabScript = Join-Path $runBuildRoot ("tab-{0}.ps1" -f (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
+        Set-Content -LiteralPath $tabScript -Value $command -Encoding utf8
+        # Keep only the few most recent tab scripts so they do not accumulate forever.
+        Get-ChildItem -LiteralPath $runBuildRoot -Filter 'tab-*.ps1' -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending |
+            Select-Object -Skip 5 |
+            ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+
+        $wtArgs = New-WtTabArgumentList -PwshPath $pwsh -ScriptPath $tabScript -Title 'DbxProvider'
+        Start-Process -FilePath $wt.Source -ArgumentList $wtArgs
+        Write-Host "Launched a new Windows Terminal tab running: $script $argLine" -ForegroundColor Cyan
+        return
+    }
+    Write-Warning "Windows Terminal (wt.exe) not found; falling back to a new window."
+    $NewWindow = $true
+}
 
 if ($NewWindow) {
     Start-Process -FilePath $pwsh -ArgumentList (@('-NoExit') + $baseArgs)
