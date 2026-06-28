@@ -488,8 +488,27 @@ namespace DbxProvider.Provider
                     }
                 }
 
-                WriteVerbose($"Get-ChildItem: routing to list_folder (path='{path}', recurse={recurse})");
                 var cache = GetCache();
+
+                // Recursive enumeration streams from the local metadata cache so a
+                // very large subtree is never buffered entirely in memory. Items are
+                // yielded per directory (each cache row is one folder's children) and
+                // only one directory's children are sorted at a time, so peak memory is
+                // bounded by the largest single folder rather than the whole subtree.
+                // The cache is the source of truth here -- build/refresh it for current
+                // data (Build-DropboxCache).
+                if (recurse && cache != null && cache.Options.Enabled)
+                {
+                    WriteVerbose($"Get-ChildItem: streaming recursive enumeration from cache (path='{path}')");
+                    foreach (var item in StreamPerDirectorySorted(cache.EnumerateItems(path)).Where(ItemKindMatches))
+                    {
+                        var providerPath = item.Path.Replace('/', '\\').TrimStart('\\');
+                        WriteDropboxItemObject(item, providerPath, item.IsFolder);
+                    }
+                    return;
+                }
+
+                WriteVerbose($"Get-ChildItem: routing to list_folder (path='{path}', recurse={recurse})");
                 var items = (cache != null && !recurse)
                     ? cache.GetChildren(path)
                     : Run(ct => service.ListFolderAsync(path, recursive: recurse, cancellationToken: ct));
@@ -509,6 +528,48 @@ namespace DbxProvider.Provider
         protected override object GetChildItemsDynamicParameters(string path, bool recurse)
         {
             return new NoSearchDynamicParameters();
+        }
+
+        /// <summary>
+        /// Streams items grouped by their immediate parent directory, emitting each
+        /// directory's sub-folders first and then its files (alphabetical within each
+        /// group). The input must already be ordered so that all children of a
+        /// directory are contiguous -- as <see cref="MetadataCache.EnumerateItems"/>
+        /// yields them (one row per folder, ordered by path). Only a single directory's
+        /// children are buffered at a time, so peak memory is bounded by the largest
+        /// folder rather than the entire subtree.
+        /// </summary>
+        private static IEnumerable<DropboxItem> StreamPerDirectorySorted(IEnumerable<DropboxItem> items)
+        {
+            string? currentParent = null;
+            var bucket = new List<DropboxItem>();
+            foreach (var item in items)
+            {
+                var parent = ApiParentPath(item.Path);
+                if (currentParent != null && !string.Equals(parent, currentParent, StringComparison.Ordinal))
+                {
+                    foreach (var sorted in SortDirectory(bucket)) yield return sorted;
+                    bucket.Clear();
+                }
+                currentParent = parent;
+                bucket.Add(item);
+            }
+            foreach (var sorted in SortDirectory(bucket)) yield return sorted;
+        }
+
+        /// <summary>Orders one directory's children: sub-folders first, then files,
+        /// alphabetical by name within each group.</summary>
+        private static IEnumerable<DropboxItem> SortDirectory(List<DropboxItem> directory) =>
+            directory.OrderBy(i => !i.IsFolder).ThenBy(i => i.Name);
+
+        /// <summary>Returns the immediate parent of a Dropbox API path
+        /// (<c>/A/B/file</c> -> <c>/A/B</c>); the root and empty paths map to <c>""</c>.</summary>
+        private static string ApiParentPath(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return "";
+            var trimmed = path.TrimEnd('/');
+            int slash = trimmed.LastIndexOf('/');
+            return slash <= 0 ? "" : trimmed.Substring(0, slash);
         }
 
         protected override void GetChildNames(string path, ReturnContainers returnContainers)

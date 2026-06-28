@@ -222,12 +222,18 @@ public class FakeDropboxServiceClient : DropboxServiceClient
     public override Task<DropboxAccount> GetCurrentAccountAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(new DropboxAccount { AccountId = "fake-account", Email = "fake@example.com", DisplayName = "Fake" });
 
+    /// <summary>Number of times the recursive overload of <see cref="ListFolderAsync"/>
+    /// was invoked, so tests can prove recursive enumeration is served from the cache
+    /// (streaming) rather than the recursive list API.</summary>
+    public int RecursiveListFolderCalls { get; private set; }
+
     public override Task<List<DropboxItem>> ListFolderAsync(string path, bool recursive = false, bool includeDeleted = false, CancellationToken cancellationToken = default)
     {
+        if (recursive) RecursiveListFolderCalls++;
         var norm = NormalizePath(path); // "" for root, "/A" otherwise
-        var children = _items
-            .Where(i => Parent(i.Path) == norm)
-            .ToList();
+        var children = recursive
+            ? _items.Where(i => IsUnder(i.Path, norm) && i.Path != norm).ToList()
+            : _items.Where(i => Parent(i.Path) == norm).ToList();
         return Task.FromResult(children);
     }
 
