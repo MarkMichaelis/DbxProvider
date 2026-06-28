@@ -173,6 +173,11 @@ namespace DbxProvider.Provider
             // Do not upload when buffering failed -- uploading the empty/partial buffer
             // would overwrite (and so destroy) the existing file.
             if (_writeFailed) return;
+            // Append mode that never wrote anything must not upload either: an empty
+            // buffer would truncate the existing file to zero bytes. (Set-Content /
+            // overwrite is not append mode, so its intentional zero-byte writes still
+            // upload.)
+            if (_appendRequested && !_appendLoaded) return;
             _writer?.Flush();
             _buffer.Position = 0;
             _service.UploadAsync(_path, _buffer).GetAwaiter().GetResult();
