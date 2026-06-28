@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Management.Automation;
-using System.Text;
 using IntelliTect.Dropbox;
 using Xunit;
 
@@ -31,7 +30,7 @@ public class ProviderBracketPathHostTests
         FakeDropboxServiceClient fake, string command)
     {
         var dllPath = Path.Combine(AppContext.BaseDirectory, "DbxProvider.dll");
-        var script = string.Join("\n", new[]
+        var script = string.Join(Environment.NewLine, new[]
         {
             "Import-Module $dllPath",
             "$prov = Get-PSProvider Dropbox",
@@ -59,9 +58,8 @@ public class ProviderBracketPathHostTests
 
         // Misrouting to search_v2 would invoke SearchByFilenameAsync on the (null)
         // underlying client and fault; correct routing lists the folder's children.
-        var sb = new StringBuilder();
-        foreach (var e in errors) sb.AppendLine(e.ToString());
-        Assert.Empty(errors);
+        Assert.True(errors.Count == 0,
+            string.Join(Environment.NewLine, errors.Select(e => e.ToString())));
 
         var paths = output.Select(o => (string)o.Properties["DropboxPath"]!.Value).ToList();
         Assert.Contains("/Data/[archive]/keep.txt", paths);
