@@ -240,45 +240,70 @@ namespace IntelliTect.Dropbox
 
             var startKey = MakeKey(startPath);
 
+            // Corrupt rows encountered while streaming are recorded here and purged
+            // after the read connection closes, so they self-heal (re-hydrate) on the
+            // next sync instead of being silently skipped forever.
+            var corruptKeys = new List<string>();
+
             // A dedicated read connection lets the reader stay open across yields
             // without holding the main connection's lock. WAL gives this reader a
             // consistent snapshot of the data committed by Flush().
-            using var connection = new SqliteConnection(
-                new SqliteConnectionStringBuilder { DataSource = _dbPath, Pooling = false }.ToString());
-            connection.Open();
-
-            using var cmd = connection.CreateCommand();
-            if (string.IsNullOrEmpty(startKey))
+            using (var connection = new SqliteConnection(
+                new SqliteConnectionStringBuilder { DataSource = _dbPath, Pooling = false }.ToString()))
             {
-                cmd.CommandText = "SELECT items_json FROM entries;";
+                connection.Open();
+
+                using var cmd = connection.CreateCommand();
+                if (string.IsNullOrEmpty(startKey))
+                {
+                    cmd.CommandText = "SELECT path_lower, items_json FROM entries;";
+                }
+                else
+                {
+                    cmd.CommandText =
+                        "SELECT path_lower, items_json FROM entries " +
+                        "WHERE path_lower = $k OR path_lower LIKE $p ESCAPE '\\';";
+                    cmd.Parameters.AddWithValue("$k", startKey);
+                    cmd.Parameters.AddWithValue("$p", EscapeLike(startKey) + "/%");
+                }
+
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    List<DropboxItem>? items;
+                    try
+                    {
+                        items = JsonSerializer.Deserialize<List<DropboxItem>>(reader.GetString(1), JsonOpts);
+                    }
+                    catch (JsonException)
+                    {
+                        // Mark the corrupt row for purge; other failures propagate.
+                        corruptKeys.Add(reader.GetString(0));
+                        continue;
+                    }
+
+                    if (items == null) continue;
+                    foreach (var item in items)
+                    {
+                        yield return item;
+                    }
+                }
             }
-            else
-            {
-                cmd.CommandText =
-                    "SELECT items_json FROM entries " +
-                    "WHERE path_lower = $k OR path_lower LIKE $p ESCAPE '\\';";
-                cmd.Parameters.AddWithValue("$k", startKey);
-                cmd.Parameters.AddWithValue("$p", EscapeLike(startKey) + "/%");
-            }
 
-            using var reader = cmd.ExecuteReader();
-            while (reader.Read())
-            {
-                List<DropboxItem>? items;
-                try
-                {
-                    items = JsonSerializer.Deserialize<List<DropboxItem>>(reader.GetString(0), JsonOpts);
-                }
-                catch (JsonException)
-                {
-                    continue; // skip a corrupt row; other failures propagate
-                }
+            // The read connection is closed: safe to delete the corrupt rows so the
+            // next sync re-fetches and re-hydrates them.
+            PurgeCorruptEntries(corruptKeys);
+        }
 
-                if (items == null) continue;
-                foreach (var item in items)
-                {
-                    yield return item;
-                }
+        /// <summary>Removes rows whose stored item list could not be deserialized,
+        /// both from the in-memory index and the database, so a subsequent sync or
+        /// listing re-hydrates them from Dropbox (self-healing).</summary>
+        private void PurgeCorruptEntries(IReadOnlyList<string> pathLowers)
+        {
+            foreach (var key in pathLowers)
+            {
+                _entries.TryRemove(key, out _);
+                DeleteRow(key);
             }
         }
 

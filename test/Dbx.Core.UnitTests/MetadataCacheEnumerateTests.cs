@@ -147,6 +147,47 @@ public sealed class MetadataCacheEnumerateTests : IDisposable
     }
 
     [Fact]
+    public async Task EnumerateItems_SelfHealsCorruptRow_ByDeletingItFromTheDatabase()
+    {
+        string dbPath;
+        {
+            var service = new FakeListServiceClient(SampleTree());
+            using var cache = new MetadataCache(service, "acct", "user@example.com", Opts());
+            await cache.BuildAsync("/");
+            dbPath = cache.DatabasePath;
+        } // dispose flushes and closes so the row can be corrupted on disk
+
+        const string corrupt = "this is not json";
+        var connectionString = new SqliteConnectionStringBuilder { DataSource = dbPath }.ToString();
+        using (var conn = new SqliteConnection(connectionString))
+        {
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE entries SET items_json = $bad WHERE items_json LIKE '%file2.txt%';";
+            cmd.Parameters.AddWithValue("$bad", corrupt);
+            cmd.ExecuteNonQuery().Should().Be(1);
+        }
+
+        // Fully enumerating a reopened cache must purge the corrupt row so it
+        // re-hydrates on the next sync, rather than silently skipping it forever.
+        {
+            var service2 = new FakeListServiceClient(SampleTree());
+            using var reopened = new MetadataCache(service2, "acct", "user@example.com", Opts());
+            reopened.EnumerateItems().ToList();
+        } // dispose so the WAL delete is visible to a fresh reader
+
+        using (var conn = new SqliteConnection(connectionString))
+        {
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM entries WHERE items_json = $bad;";
+            cmd.Parameters.AddWithValue("$bad", corrupt);
+            Convert.ToInt64(cmd.ExecuteScalar()).Should().Be(0,
+                "the corrupt row must be deleted so it self-heals on the next sync");
+        }
+    }
+
+    [Fact]
     public async Task FindItems_EmptyPathItems_AreNotCollapsedByDedup()
     {
         string dbPath;
