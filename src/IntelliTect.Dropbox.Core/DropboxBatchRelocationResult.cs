@@ -13,13 +13,23 @@ public sealed class DropboxBatchRelocationError
 {
     /// <summary>Creates a failure record for a single relocation entry.</summary>
     /// <param name="reason">A short, human-readable description of the failure.</param>
-    public DropboxBatchRelocationError(string reason)
+    /// <param name="fromPath">The source path of the entry that failed, when known.</param>
+    /// <param name="toPath">The destination path of the entry that failed, when known.</param>
+    public DropboxBatchRelocationError(string reason, string? fromPath = null, string? toPath = null)
     {
         Reason = reason;
+        FromPath = fromPath;
+        ToPath = toPath;
     }
 
     /// <summary>A short, human-readable description of the failure.</summary>
     public string Reason { get; }
+
+    /// <summary>The source path of the entry that failed, when known.</summary>
+    public string? FromPath { get; }
+
+    /// <summary>The destination path of the entry that failed, when known.</summary>
+    public string? ToPath { get; }
 }
 
 /// <summary>

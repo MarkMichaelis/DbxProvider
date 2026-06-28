@@ -74,9 +74,11 @@ namespace DbxProvider.Cmdlets
         public SwitchParameter Force { get; set; }
 
         /// <summary>How to write the file: <c>add</c> keeps an existing file (uploading
-        /// to an auto-renamed path on conflict); <c>overwrite</c> replaces it.</summary>
+        /// to an auto-renamed path on conflict); <c>overwrite</c> replaces it. <c>update</c>
+        /// is accepted for backward compatibility but is not truly supported (it requires
+        /// an expected revision); it warns and behaves as <c>overwrite</c>.</summary>
         [Parameter]
-        [ValidateSet("add", "overwrite")]
+        [ValidateSet("add", "overwrite", "update")]
         public string WriteMode { get; set; } = "overwrite";
 
         protected override void ProcessRecord()
@@ -93,9 +95,16 @@ namespace DbxProvider.Cmdlets
                     return;
                 }
 
-                // -Force forces overwrite; otherwise honor the validated WriteMode.
+                if (WriteMode.Equals("update", StringComparison.OrdinalIgnoreCase))
+                {
+                    WriteWarning("WriteMode 'update' requires an expected revision and is not supported; " +
+                        "treating it as 'overwrite'. Use -WriteMode overwrite (or -Force) explicitly.");
+                }
+
+                // -Force forces overwrite; otherwise honor the validated WriteMode
+                // ('add' keeps the existing file, anything else overwrites).
                 bool overwrite = Force.IsPresent
-                    || WriteMode.Equals("overwrite", StringComparison.OrdinalIgnoreCase);
+                    || !WriteMode.Equals("add", StringComparison.OrdinalIgnoreCase);
                 Dropbox.Api.Files.WriteMode mode = overwrite
                     ? Dropbox.Api.Files.WriteMode.Overwrite.Instance
                     : Dropbox.Api.Files.WriteMode.Add.Instance;

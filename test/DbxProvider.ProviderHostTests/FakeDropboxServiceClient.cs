@@ -184,10 +184,16 @@ public class FakeDropboxServiceClient : DropboxServiceClient
         return mode.ToString();
     }
 
+    /// <summary>When set, <see cref="DownloadAsync"/> throws this instead of
+    /// returning content -- used to simulate a transient read failure during an
+    /// append so a test can prove the writer does not overwrite the file.</summary>
+    public Exception? DownloadException { get; set; }
+
     /// <summary>Returns the in-memory content for a path (or throws if absent),
     /// mirroring a real download so the content reader and append-writer work offline.</summary>
     public override Task<(System.IO.Stream Content, DropboxItem Metadata)> DownloadAsync(string path, CancellationToken cancellationToken = default)
     {
+        if (DownloadException != null) throw DownloadException;
         var norm = NormalizePath(path);
         if (!FileBytes.TryGetValue(norm, out var bytes))
             throw new System.IO.FileNotFoundException("Not found: " + norm);

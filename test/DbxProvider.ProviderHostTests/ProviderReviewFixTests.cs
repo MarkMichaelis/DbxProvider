@@ -28,7 +28,8 @@ public class ProviderReviewFixTests
     private sealed record Result(
         FakeDropboxServiceClient Fake,
         Collection<PSObject> Output,
-        IReadOnlyList<ErrorRecord> Errors);
+        IReadOnlyList<ErrorRecord> Errors,
+        IReadOnlyList<string> Warnings);
 
     private static Result RunScript(FakeDropboxServiceClient fake, string command, bool failOnError = true)
     {
@@ -49,6 +50,7 @@ public class ProviderReviewFixTests
         ps.AddScript(script);
         var output = ps.Invoke();
         var errors = ps.Streams.Error.ToArray();
+        var warnings = ps.Streams.Warning.Select(w => w.Message).ToArray();
 
         if (failOnError && errors.Length > 0)
         {
@@ -56,7 +58,7 @@ public class ProviderReviewFixTests
             foreach (var e in errors) sb.AppendLine(e.ToString());
             Assert.Fail(sb.ToString());
         }
-        return new Result(fake, output, errors);
+        return new Result(fake, output, errors, warnings);
     }
 
     [Fact]
@@ -100,9 +102,45 @@ public class ProviderReviewFixTests
         RunScript(fake, "Add-Content -LiteralPath 'Dbx:\\A\\b.txt' -Value 'world'");
 
         var upload = fake.Uploads.Last();
+        // Byte-level: existing content must be preserved verbatim with NO UTF-8 BOM
+        // injected before it, then the appended line follows.
+        Assert.False(StartsWithUtf8Bom(upload.Content), "append must not inject a UTF-8 BOM before existing content");
         var text = Encoding.UTF8.GetString(upload.Content);
         Assert.StartsWith("hello", text);
         Assert.Contains("world", text);
+    }
+
+    private static bool StartsWithUtf8Bom(byte[] bytes) =>
+        bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
+
+    [Fact]
+    public void AddContent_WhenExistingFileReadFails_DoesNotOverwrite()
+    {
+        var fake = new FakeDropboxServiceClient(SeedItems())
+        {
+            // The file exists, but reading it for the append preload fails transiently.
+            DownloadException = new IOException("transient network failure"),
+        };
+
+        var result = RunScript(fake, "Add-Content -LiteralPath 'Dbx:\\A\\b.txt' -Value 'world'",
+            failOnError: false);
+
+        Assert.NotEmpty(result.Errors);
+        Assert.Empty(fake.Uploads); // must NOT replace the existing file with just 'world'
+    }
+
+    [Fact]
+    public void SetContent_AsByteStream_WithStringValue_DoesNotCorruptOrThrow()
+    {
+        var fake = new FakeDropboxServiceClient(SeedItems());
+
+        var result = RunScript(fake,
+            "Set-Content -LiteralPath 'Dbx:\\A\\b.txt' -AsByteStream -Value 'A'",
+            failOnError: false);
+
+        Assert.Empty(result.Errors);
+        var upload = Assert.Single(fake.Uploads);
+        Assert.Equal(new byte[] { 0x41 }, upload.Content);
     }
 
     [Fact]
@@ -112,7 +150,7 @@ public class ProviderReviewFixTests
         {
             NextRelocationResult = new DropboxBatchRelocationResult(
                 new List<DropboxItem> { new() { Name = "a", Path = "/C/a", IsFolder = false, Id = "id:Ca" } },
-                new List<DropboxBatchRelocationError> { new("to/path/conflict") }),
+                new List<DropboxBatchRelocationError> { new("to/path/conflict", "/A/b", "/C/b") }),
         };
 
         var result = RunScript(fake,
@@ -122,6 +160,9 @@ public class ProviderReviewFixTests
         Assert.Single(result.Output);
         var error = Assert.Single(result.Errors);
         Assert.Contains("to/path/conflict", error.ToString());
+        // The failing entry must be identifiable: its source path is the error target.
+        Assert.Equal("/A/b", error.TargetObject);
+        Assert.Contains("/A/b", error.Exception.Message);
     }
 
     [Fact]
@@ -173,18 +214,22 @@ public class ProviderReviewFixTests
     }
 
     [Fact]
-    public void InvokeDropboxUpload_RejectsRemovedUpdateWriteMode()
+    public void InvokeDropboxUpload_UpdateWriteMode_WarnsAndTreatsAsOverwrite()
     {
         var fake = new FakeDropboxServiceClient(SeedItems());
         var temp = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".txt");
         File.WriteAllText(temp, "payload");
         try
         {
+            // 'update' was previously accepted (and silently overwrote). It stays
+            // accepted for back-compat but must now WARN and behave as overwrite.
             var result = RunScript(fake,
                 $"Invoke-DropboxUpload -Source '{temp}' -DropboxPath '/A/up.txt' -WriteMode update -Confirm:$false",
                 failOnError: false);
-            Assert.NotEmpty(result.Errors);
-            Assert.Empty(fake.Uploads);
+            Assert.Empty(result.Errors);
+            Assert.Contains(result.Warnings, w => w.Contains("update", StringComparison.OrdinalIgnoreCase));
+            var upload = Assert.Single(fake.Uploads);
+            Assert.Equal("overwrite", upload.Mode);
         }
         finally { File.Delete(temp); }
     }

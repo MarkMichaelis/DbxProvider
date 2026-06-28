@@ -913,14 +913,15 @@ namespace IntelliTect.Dropbox
 
         private async Task<DropboxBatchRelocationResult> CopyBatchCoreAsync(IEnumerable<(string from, string to)> entries)
         {
-            var paths = entries.Select(e => new RelocationPath(NormalizePath(e.from), NormalizePath(e.to))).ToList();
+            var entryList = entries.ToList();
+            var paths = entryList.Select(e => new RelocationPath(NormalizePath(e.from), NormalizePath(e.to))).ToList();
             var result = await _client.Files.CopyBatchV2Async(paths);
             if (result.IsAsyncJobId)
                 return await PollRelocationBatchAsync(result.AsAsyncJobId.Value,
-                    id => _client.Files.CopyBatchCheckV2Async(id));
+                    id => _client.Files.CopyBatchCheckV2Async(id), entryList);
             // The batch completed synchronously: map its entries directly instead of
             // dropping them (which previously reported every item as missing output).
-            return MapRelocationEntries(result.AsComplete.Value.Entries);
+            return MapRelocationEntries(result.AsComplete.Value.Entries, entryList);
         }
 
         public virtual Task<DropboxBatchRelocationResult> MoveBatchAsync(IEnumerable<(string from, string to)> entries, CancellationToken cancellationToken = default) =>
@@ -928,12 +929,13 @@ namespace IntelliTect.Dropbox
 
         private async Task<DropboxBatchRelocationResult> MoveBatchCoreAsync(IEnumerable<(string from, string to)> entries)
         {
-            var paths = entries.Select(e => new RelocationPath(NormalizePath(e.from), NormalizePath(e.to))).ToList();
+            var entryList = entries.ToList();
+            var paths = entryList.Select(e => new RelocationPath(NormalizePath(e.from), NormalizePath(e.to))).ToList();
             var result = await _client.Files.MoveBatchV2Async(paths);
             if (result.IsAsyncJobId)
                 return await PollRelocationBatchAsync(result.AsAsyncJobId.Value,
-                    id => _client.Files.MoveBatchCheckV2Async(id));
-            return MapRelocationEntries(result.AsComplete.Value.Entries);
+                    id => _client.Files.MoveBatchCheckV2Async(id), entryList);
+            return MapRelocationEntries(result.AsComplete.Value.Entries, entryList);
         }
 
         /// <summary>
@@ -1039,6 +1041,11 @@ namespace IntelliTect.Dropbox
                 try { await Task.WhenAll(tasks).ConfigureAwait(false); }
                 catch (OperationCanceledException) { /* expected when cancelled */ }
             }
+
+            // If cancellation was requested after all chunks were scheduled (so no
+            // OperationCanceledException propagated from the loop), surface it now --
+            // a cancelled batch must not return as though it completed successfully.
+            cancellationToken.ThrowIfCancellationRequested();
 
             return failures;
         }
@@ -1395,35 +1402,41 @@ namespace IntelliTect.Dropbox
         }
 
         private async Task<DropboxBatchRelocationResult> PollRelocationBatchAsync(
-            string jobId, Func<string, Task<RelocationBatchV2JobStatus>> checkFunc)
+            string jobId, Func<string, Task<RelocationBatchV2JobStatus>> checkFunc,
+            IReadOnlyList<(string from, string to)> entries)
         {
             while (true)
             {
                 await Task.Delay(500);
                 var status = await checkFunc(jobId);
                 if (status.IsComplete)
-                    return MapRelocationEntries(status.AsComplete.Value.Entries);
+                    return MapRelocationEntries(status.AsComplete.Value.Entries, entries);
             }
         }
 
         /// <summary>
         /// Maps the per-entry results of a Dropbox batch relocation into successes
         /// and failures so partial failures surface as errors rather than being
-        /// silently dropped from the returned items.
+        /// silently dropped from the returned items. Results are positionally aligned
+        /// with the submitted <paramref name="entries"/>, so each failure is tagged
+        /// with the source/destination path it came from.
         /// </summary>
         private static DropboxBatchRelocationResult MapRelocationEntries(
-            IEnumerable<RelocationBatchResultEntry> entries)
+            IList<RelocationBatchResultEntry> entries,
+            IReadOnlyList<(string from, string to)> requested)
         {
             var items = new List<DropboxItem>();
             var failures = new List<DropboxBatchRelocationError>();
-            foreach (var entry in entries)
+            for (int i = 0; i < entries.Count; i++)
             {
+                var entry = entries[i];
+                var (from, to) = i < requested.Count ? requested[i] : (null!, null!);
                 if (entry.IsSuccess)
                     items.Add(MapMetadataToItem(entry.AsSuccess.Value));
                 else if (entry.IsFailure)
-                    failures.Add(new DropboxBatchRelocationError(DescribeRelocationError(entry.AsFailure.Value)));
+                    failures.Add(new DropboxBatchRelocationError(DescribeRelocationError(entry.AsFailure.Value), from, to));
                 else
-                    failures.Add(new DropboxBatchRelocationError("Unknown relocation result."));
+                    failures.Add(new DropboxBatchRelocationError("Unknown relocation result.", from, to));
             }
             return new DropboxBatchRelocationResult(items, failures);
         }
