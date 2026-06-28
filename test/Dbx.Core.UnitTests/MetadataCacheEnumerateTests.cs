@@ -188,6 +188,50 @@ public sealed class MetadataCacheEnumerateTests : IDisposable
     }
 
     [Fact]
+    public async Task EnumerateItems_SelfHealsCorruptRow_EvenWhenEnumerationStopsEarly()
+    {
+        string dbPath;
+        {
+            var service = new FakeListServiceClient(SampleTree());
+            using var cache = new MetadataCache(service, "acct", "user@example.com", Opts());
+            await cache.BuildAsync("/");
+            dbPath = cache.DatabasePath;
+        }
+
+        const string corrupt = "this is not json";
+        var connectionString = new SqliteConnectionStringBuilder { DataSource = dbPath }.ToString();
+        using (var conn = new SqliteConnection(connectionString))
+        {
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE entries SET items_json = $bad WHERE items_json LIKE '%file2.txt%';";
+            cmd.Parameters.AddWithValue("$bad", corrupt);
+            cmd.ExecuteNonQuery().Should().Be(1);
+        }
+
+        // Consume only the first item, then abandon the iterator. ORDER BY path_lower
+        // puts the corrupt '/A' row before '/A/B', so it is read before the first item
+        // is yielded; the purge in the finally must still run when the iterator is
+        // disposed early (e.g. First()/Take(n)).
+        {
+            var service2 = new FakeListServiceClient(SampleTree());
+            using var reopened = new MetadataCache(service2, "acct", "user@example.com", Opts());
+            using var e = reopened.EnumerateItems("/A").GetEnumerator();
+            e.MoveNext().Should().BeTrue();
+        } // iterator disposed here -> finally purges the corrupt row seen so far
+
+        using (var conn = new SqliteConnection(connectionString))
+        {
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM entries WHERE items_json = $bad;";
+            cmd.Parameters.AddWithValue("$bad", corrupt);
+            Convert.ToInt64(cmd.ExecuteScalar()).Should().Be(0,
+                "early-terminated enumeration must still purge corrupt rows seen so far");
+        }
+    }
+
+    [Fact]
     public async Task FindItems_EmptyPathItems_AreNotCollapsedByDedup()
     {
         string dbPath;
