@@ -241,28 +241,30 @@ namespace IntelliTect.Dropbox
             var startKey = MakeKey(startPath);
 
             // Corrupt rows encountered while streaming are recorded here and purged
-            // after the read connection closes, so they self-heal (re-hydrate) on the
-            // next sync instead of being silently skipped forever.
+            // in a finally so they self-heal (re-hydrate) on the next sync even when
+            // the caller stops enumerating early (e.g. First()/Take(n)), which
+            // disposes the iterator before the read loop completes.
             var corruptKeys = new List<string>();
-
-            // A dedicated read connection lets the reader stay open across yields
-            // without holding the main connection's lock. WAL gives this reader a
-            // consistent snapshot of the data committed by Flush().
-            using (var connection = new SqliteConnection(
-                new SqliteConnectionStringBuilder { DataSource = _dbPath, Pooling = false }.ToString()))
+            try
             {
+                // A dedicated read connection lets the reader stay open across yields
+                // without holding the main connection's lock. WAL gives this reader a
+                // consistent snapshot of the data committed by Flush().
+                using var connection = new SqliteConnection(
+                    new SqliteConnectionStringBuilder { DataSource = _dbPath, Pooling = false }.ToString());
                 connection.Open();
 
                 using var cmd = connection.CreateCommand();
                 if (string.IsNullOrEmpty(startKey))
                 {
-                    cmd.CommandText = "SELECT path_lower, items_json FROM entries;";
+                    cmd.CommandText = "SELECT path_lower, items_json FROM entries ORDER BY path_lower;";
                 }
                 else
                 {
                     cmd.CommandText =
                         "SELECT path_lower, items_json FROM entries " +
-                        "WHERE path_lower = $k OR path_lower LIKE $p ESCAPE '\\';";
+                        "WHERE path_lower = $k OR path_lower LIKE $p ESCAPE '\\' " +
+                        "ORDER BY path_lower;";
                     cmd.Parameters.AddWithValue("$k", startKey);
                     cmd.Parameters.AddWithValue("$p", EscapeLike(startKey) + "/%");
                 }
@@ -289,10 +291,13 @@ namespace IntelliTect.Dropbox
                     }
                 }
             }
-
-            // The read connection is closed: safe to delete the corrupt rows so the
-            // next sync re-fetches and re-hydrates them.
-            PurgeCorruptEntries(corruptKeys);
+            finally
+            {
+                // The read connection (a using-var local above) is disposed before
+                // this finally runs, so deleting the corrupt rows here is safe whether
+                // enumeration completed or was abandoned early.
+                PurgeCorruptEntries(corruptKeys);
+            }
         }
 
         /// <summary>Removes rows whose stored item list could not be deserialized,
