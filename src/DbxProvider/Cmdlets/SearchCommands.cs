@@ -145,8 +145,7 @@ namespace DbxProvider.Cmdlets
 
             if (ContainsWildcard(Query))
             {
-                var items = service.SearchByFilenameAsync(Query, Path, MaxResults)
-                    .GetAwaiter().GetResult();
+                var items = Run(ct => service.SearchByFilenameAsync(Query, Path, MaxResults, cancellationToken: ct));
                 foreach (var item in items)
                     WriteObject(new DropboxSearchResult { MatchType = "Filename", Item = item });
                 WriteVerbose($"Found {items.Count} server result(s) for wildcard '{Query}'.");

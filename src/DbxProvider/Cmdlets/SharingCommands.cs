@@ -74,8 +74,7 @@ namespace DbxProvider.Cmdlets
 
                 if (!string.IsNullOrEmpty(SharedFolderId))
                 {
-                    var folder = service.GetSharedFolderMetadataAsync(SharedFolderId)
-                        .GetAwaiter().GetResult();
+                    var folder = Run(ct => service.GetSharedFolderMetadataAsync(SharedFolderId, cancellationToken: ct));
                     WriteObject(folder);
                 }
                 else
@@ -120,14 +119,12 @@ namespace DbxProvider.Cmdlets
 
                 if (!string.IsNullOrEmpty(SharedFolderId))
                 {
-                    service.AddFolderMemberAsync(SharedFolderId, Email, AccessLevel)
-                        .GetAwaiter().GetResult();
+                    Run(ct => service.AddFolderMemberAsync(SharedFolderId, Email, AccessLevel, cancellationToken: ct));
                     WriteVerbose($"Added {Email} to shared folder {SharedFolderId} as {AccessLevel}");
                 }
                 else if (!string.IsNullOrEmpty(FilePath))
                 {
-                    service.AddFileMemberAsync(FilePath, Email, AccessLevel)
-                        .GetAwaiter().GetResult();
+                    Run(ct => service.AddFileMemberAsync(FilePath, Email, AccessLevel, cancellationToken: ct));
                     WriteVerbose($"Added {Email} to file {FilePath} as {AccessLevel}");
                 }
             }
@@ -163,14 +160,12 @@ namespace DbxProvider.Cmdlets
 
                     if (!string.IsNullOrEmpty(SharedFolderId))
                     {
-                        service.RemoveFolderMemberAsync(SharedFolderId, Email)
-                            .GetAwaiter().GetResult();
+                        Run(ct => service.RemoveFolderMemberAsync(SharedFolderId, Email, cancellationToken: ct));
                         WriteVerbose($"Removed {Email} from shared folder {SharedFolderId}");
                     }
                     else if (!string.IsNullOrEmpty(FilePath))
                     {
-                        service.RemoveFileMemberAsync(FilePath, Email)
-                            .GetAwaiter().GetResult();
+                        Run(ct => service.RemoveFileMemberAsync(FilePath, Email, cancellationToken: ct));
                         WriteVerbose($"Removed {Email} from file {FilePath}");
                     }
                 }
@@ -202,14 +197,12 @@ namespace DbxProvider.Cmdlets
 
                 if (!string.IsNullOrEmpty(SharedFolderId))
                 {
-                    var members = service.ListFolderMembersAsync(SharedFolderId)
-                        .GetAwaiter().GetResult();
+                    var members = Run(ct => service.ListFolderMembersAsync(SharedFolderId, cancellationToken: ct));
                     foreach (var m in members) WriteObject(m);
                 }
                 else if (!string.IsNullOrEmpty(FilePath))
                 {
-                    var members = service.ListFileMembersAsync(FilePath)
-                        .GetAwaiter().GetResult();
+                    var members = Run(ct => service.ListFileMembersAsync(FilePath, cancellationToken: ct));
                     foreach (var m in members) WriteObject(m);
                 }
             }

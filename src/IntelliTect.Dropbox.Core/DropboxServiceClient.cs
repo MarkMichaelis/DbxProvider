@@ -74,6 +74,20 @@ namespace IntelliTect.Dropbox
             if (string.IsNullOrEmpty(path) || path == "\\" || path == "/" || path == ".")
                 return "";
             path = path.Replace('\\', '/');
+            // Strip a leading PowerShell drive qualifier (e.g. "Dbx:/Folder/file"
+            // produced when a provider path such as "Dbx:\Folder\file" is piped into
+            // a Dropbox API cmdlet). Dropbox file/folder names cannot contain ':', so
+            // a colon appearing before the first '/' can only be a drive qualifier;
+            // without this the path becomes "/Dbx:/Folder/file" and the API rejects it.
+            int colon = path.IndexOf(':');
+            if (colon >= 0)
+            {
+                int slash = path.IndexOf('/');
+                if (slash < 0 || colon < slash)
+                    path = path.Substring(colon + 1);
+            }
+            if (string.IsNullOrEmpty(path) || path == "/")
+                return "";
             if (!path.StartsWith("/"))
                 path = "/" + path;
             return path.TrimEnd('/');
@@ -261,7 +275,7 @@ namespace IntelliTect.Dropbox
 
         #region Files - Download / Upload
 
-        public Task<(Stream Content, DropboxItem Metadata)> DownloadAsync(string path, CancellationToken cancellationToken = default) =>
+        public virtual Task<(Stream Content, DropboxItem Metadata)> DownloadAsync(string path, CancellationToken cancellationToken = default) =>
             RetryAsync(_ => DownloadCoreAsync(path), cancellationToken);
 
         private async Task<(Stream Content, DropboxItem Metadata)> DownloadCoreAsync(string path)
@@ -894,30 +908,32 @@ namespace IntelliTect.Dropbox
 
         #region Batch Operations
 
-        public Task<List<DropboxItem>> CopyBatchAsync(IEnumerable<(string from, string to)> entries, CancellationToken cancellationToken = default) =>
+        public virtual Task<DropboxBatchRelocationResult> CopyBatchAsync(IEnumerable<(string from, string to)> entries, CancellationToken cancellationToken = default) =>
             RetryAsync(_ => CopyBatchCoreAsync(entries), cancellationToken);
 
-        private async Task<List<DropboxItem>> CopyBatchCoreAsync(IEnumerable<(string from, string to)> entries)
+        private async Task<DropboxBatchRelocationResult> CopyBatchCoreAsync(IEnumerable<(string from, string to)> entries)
         {
             var paths = entries.Select(e => new RelocationPath(NormalizePath(e.from), NormalizePath(e.to))).ToList();
             var result = await _client.Files.CopyBatchV2Async(paths);
             if (result.IsAsyncJobId)
                 return await PollRelocationBatchAsync(result.AsAsyncJobId.Value,
                     id => _client.Files.CopyBatchCheckV2Async(id));
-            return new List<DropboxItem>();
+            // The batch completed synchronously: map its entries directly instead of
+            // dropping them (which previously reported every item as missing output).
+            return MapRelocationEntries(result.AsComplete.Value.Entries);
         }
 
-        public Task<List<DropboxItem>> MoveBatchAsync(IEnumerable<(string from, string to)> entries, CancellationToken cancellationToken = default) =>
+        public virtual Task<DropboxBatchRelocationResult> MoveBatchAsync(IEnumerable<(string from, string to)> entries, CancellationToken cancellationToken = default) =>
             RetryAsync(_ => MoveBatchCoreAsync(entries), cancellationToken);
 
-        private async Task<List<DropboxItem>> MoveBatchCoreAsync(IEnumerable<(string from, string to)> entries)
+        private async Task<DropboxBatchRelocationResult> MoveBatchCoreAsync(IEnumerable<(string from, string to)> entries)
         {
             var paths = entries.Select(e => new RelocationPath(NormalizePath(e.from), NormalizePath(e.to))).ToList();
             var result = await _client.Files.MoveBatchV2Async(paths);
             if (result.IsAsyncJobId)
                 return await PollRelocationBatchAsync(result.AsAsyncJobId.Value,
                     id => _client.Files.MoveBatchCheckV2Async(id));
-            return new List<DropboxItem>();
+            return MapRelocationEntries(result.AsComplete.Value.Entries);
         }
 
         /// <summary>
@@ -973,47 +989,57 @@ namespace IntelliTect.Dropbox
             var failuresLock = new object();
             var tasks = new List<Task>(chunks.Count);
 
-            foreach (var chunk in chunks)
+            try
             {
-                await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-                var local = chunk;
-                tasks.Add(Task.Run(async () =>
+                foreach (var chunk in chunks)
                 {
-                    try
+                    await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    var local = chunk;
+                    tasks.Add(Task.Run(async () =>
                     {
-                        var chunkFailures = await DeleteBatchAsync(local, onItemsProcessed, cancellationToken).ConfigureAwait(false);
-                        if (chunkFailures.Count > 0)
+                        try
                         {
-                            lock (failuresLock) { failures.AddRange(chunkFailures); }
-                        }
-                        onChunkCompleted?.Invoke(local.Count);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch (Exception ex)
-                    {
-                        // A whole-chunk error must never abort the other in-flight chunks
-                        // or lose this chunk's paths. Convert it to per-path failures with
-                        // the real paths so the caller records and re-queues them.
-                        lock (failuresLock)
-                        {
-                            foreach (var path in local)
+                            var chunkFailures = await DeleteBatchAsync(local, onItemsProcessed, cancellationToken).ConfigureAwait(false);
+                            if (chunkFailures.Count > 0)
                             {
-                                failures.Add(new DropboxBatchDeleteError(path, ex.Message));
+                                lock (failuresLock) { failures.AddRange(chunkFailures); }
                             }
+                            onChunkCompleted?.Invoke(local.Count);
                         }
-                        onChunkCompleted?.Invoke(local.Count);
-                    }
-                    finally
-                    {
-                        gate.Release();
-                    }
-                }, cancellationToken));
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (Exception ex)
+                        {
+                            // A whole-chunk error must never abort the other in-flight chunks
+                            // or lose this chunk's paths. Convert it to per-path failures with
+                            // the real paths so the caller records and re-queues them.
+                            lock (failuresLock)
+                            {
+                                foreach (var path in local)
+                                {
+                                    failures.Add(new DropboxBatchDeleteError(path, ex.Message));
+                                }
+                            }
+                            onChunkCompleted?.Invoke(local.Count);
+                        }
+                        finally
+                        {
+                            gate.Release();
+                        }
+                    }, cancellationToken));
+                }
+            }
+            finally
+            {
+                // Even if WaitAsync throws on cancellation mid-loop, await the chunk
+                // tasks already started so they are not orphaned as unobserved
+                // fire-and-forget operations that could overlap a caller's retry.
+                try { await Task.WhenAll(tasks).ConfigureAwait(false); }
+                catch (OperationCanceledException) { /* expected when cancelled */ }
             }
 
-            await Task.WhenAll(tasks).ConfigureAwait(false);
             return failures;
         }
 
@@ -1368,7 +1394,7 @@ namespace IntelliTect.Dropbox
             return r.Length == 0 ? "unknown error" : r;
         }
 
-        private async Task<List<DropboxItem>> PollRelocationBatchAsync(
+        private async Task<DropboxBatchRelocationResult> PollRelocationBatchAsync(
             string jobId, Func<string, Task<RelocationBatchV2JobStatus>> checkFunc)
         {
             while (true)
@@ -1376,11 +1402,42 @@ namespace IntelliTect.Dropbox
                 await Task.Delay(500);
                 var status = await checkFunc(jobId);
                 if (status.IsComplete)
-                    return status.AsComplete.Value.Entries
-                        .Where(e => e.IsSuccess)
-                        .Select(e => MapMetadataToItem(e.AsSuccess.Value))
-                        .ToList();
+                    return MapRelocationEntries(status.AsComplete.Value.Entries);
             }
+        }
+
+        /// <summary>
+        /// Maps the per-entry results of a Dropbox batch relocation into successes
+        /// and failures so partial failures surface as errors rather than being
+        /// silently dropped from the returned items.
+        /// </summary>
+        private static DropboxBatchRelocationResult MapRelocationEntries(
+            IEnumerable<RelocationBatchResultEntry> entries)
+        {
+            var items = new List<DropboxItem>();
+            var failures = new List<DropboxBatchRelocationError>();
+            foreach (var entry in entries)
+            {
+                if (entry.IsSuccess)
+                    items.Add(MapMetadataToItem(entry.AsSuccess.Value));
+                else if (entry.IsFailure)
+                    failures.Add(new DropboxBatchRelocationError(DescribeRelocationError(entry.AsFailure.Value)));
+                else
+                    failures.Add(new DropboxBatchRelocationError("Unknown relocation result."));
+            }
+            return new DropboxBatchRelocationResult(items, failures);
+        }
+
+        /// <summary>Produces a short, human-readable description of a batch relocation failure.</summary>
+        private static string DescribeRelocationError(RelocationBatchErrorEntry error)
+        {
+            if (error.IsRelocationError)
+                return error.AsRelocationError.Value.ToString() ?? "relocation error";
+            if (error.IsInternalError)
+                return "internal error";
+            if (error.IsTooManyWriteOperations)
+                return "too many write operations";
+            return error.ToString() ?? "unknown error";
         }
 
         #endregion

@@ -24,24 +24,24 @@ namespace DbxProvider.Provider
             _raw = raw;
         }
 
+        /// <summary>
+        /// The maximum number of bytes returned from a single raw-mode
+        /// <see cref="Read"/> call. Bounds memory so reading a multi-gigabyte file
+        /// with <c>-AsByteStream</c> streams in fixed-size blocks instead of
+        /// materializing the whole file as one array (which exhausted memory).
+        /// </summary>
+        private const int MaxRawBlockSize = 81920;
+
+        /// <summary>Reads up to <paramref name="readCount"/> lines, or a bounded byte block in raw mode.</summary>
         public IList Read(long readCount)
         {
             var result = new ArrayList();
+            EnsureOpen();
 
-            if (_stream == null)
+            if (_raw)
             {
-                var (content, _) = _service.DownloadAsync(_path).GetAwaiter().GetResult();
-                _stream = content;
-
-                if (_raw)
-                {
-                    using var ms = new MemoryStream();
-                    _stream.CopyTo(ms);
-                    result.Add(ms.ToArray());
-                    return result;
-                }
-
-                _reader = new StreamReader(_stream);
+                ReadRawBlock(readCount, result);
+                return result;
             }
 
             if (_reader == null) return result;
@@ -54,6 +54,38 @@ namespace DbxProvider.Provider
             }
 
             return result;
+        }
+
+        /// <summary>Downloads and opens the file stream on first read.</summary>
+        private void EnsureOpen()
+        {
+            if (_stream != null) return;
+            var (content, _) = _service.DownloadAsync(_path).GetAwaiter().GetResult();
+            _stream = content;
+            if (!_raw)
+            {
+                _reader = new StreamReader(_stream);
+            }
+        }
+
+        /// <summary>Reads a single bounded block of raw bytes from the stream.</summary>
+        private void ReadRawBlock(long readCount, ArrayList result)
+        {
+            if (_stream == null) return;
+            int cap = readCount > 0 && readCount < MaxRawBlockSize ? (int)readCount : MaxRawBlockSize;
+            var buffer = new byte[cap];
+            int read = _stream.Read(buffer, 0, cap);
+            if (read <= 0) return;
+            if (read == cap)
+            {
+                result.Add(buffer);
+            }
+            else
+            {
+                var trimmed = new byte[read];
+                Array.Copy(buffer, trimmed, read);
+                result.Add(trimmed);
+            }
         }
 
         public void Seek(long offset, SeekOrigin origin)

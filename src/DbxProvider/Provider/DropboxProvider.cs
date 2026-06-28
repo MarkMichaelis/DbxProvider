@@ -129,7 +129,11 @@ namespace DbxProvider.Provider
                 {
                     try { action(); } catch { /* best-effort UI write */ }
                 }
-                Thread.Sleep(50);
+                // Wake immediately when the call finishes, but cap the wait so
+                // Stopping (Ctrl+C) and queued UI writes are still serviced ~20x/s
+                // during a long call -- avoiding a fixed 50ms latency floor on every
+                // fast provider operation (navigation, existence checks).
+                Task.WaitAny(new[] { task }, 50);
             }
             while (_pendingWrites.TryDequeue(out var action))
             {
@@ -221,6 +225,37 @@ namespace DbxProvider.Provider
             return DropboxServiceClient.NormalizePath(providerPath);
         }
 
+        /// <summary>
+        /// Emits a <see cref="DropboxItem"/> through the provider with its
+        /// <c>Path</c> property shadowed by a drive-qualified provider path
+        /// (e.g. <c>Dbx:\Folder\file</c>) and the raw API path preserved on a
+        /// <c>DropboxPath</c> note property. <see cref="DropboxItem"/> exposes a
+        /// public <c>Path</c> property holding the raw API path (<c>/Folder/file</c>);
+        /// when an item is piped to <c>Remove-Item</c>/<c>Get-Item</c>, the cmdlet's
+        /// <c>-Path</c> binds that property ahead of <c>PSPath</c>, so a bare API
+        /// path would be rooted against the current (possibly filesystem) location
+        /// instead of routing back through this provider. Shadowing <c>Path</c> with
+        /// the drive-qualified value makes <c>Get-ChildItem Dbx:\... | Remove-Item</c>
+        /// delete the Dropbox item rather than a same-named local path.
+        /// </summary>
+        private void WriteDropboxItemObject(DropboxItem item, string providerPath, bool isContainer)
+        {
+            var pso = PSObject.AsPSObject(item);
+            pso.Properties.Add(new PSNoteProperty("DropboxPath", item.Path));
+            pso.Properties.Add(new PSNoteProperty("Path", ToDriveQualifiedPath(item.Path)));
+            WriteItemObject(pso, providerPath, isContainer);
+        }
+
+        /// <summary>Converts a Dropbox API path (<c>/Folder/file</c>) to a
+        /// drive-qualified provider path (<c>Dbx:\Folder\file</c>) for the active drive.</summary>
+        private string ToDriveQualifiedPath(string apiPath)
+        {
+            var driveName = (PSDriveInfo as DropboxDriveInfo)?.Name
+                ?? ResolveDriveInfo()?.Name
+                ?? "Dbx";
+            return driveName + ":" + (apiPath ?? string.Empty).Replace('/', '\\');
+        }
+
         protected override bool IsValidPath(string path)
         {
             return path != null;
@@ -309,7 +344,7 @@ namespace DbxProvider.Provider
             {
                 var service = GetService();
                 var item = Run(ct => service.GetMetadataAsync(path, cancellationToken: ct));
-                WriteItemObject(item, item.Path, item.IsFolder);
+                WriteDropboxItemObject(item, item.Path, item.IsFolder);
             }
             catch (Exception ex)
             {
@@ -426,7 +461,7 @@ namespace DbxProvider.Provider
                         foreach (var item in found.Where(ItemKindMatches).OrderBy(i => !i.IsFolder).ThenBy(i => i.Name))
                         {
                             var providerPath = item.Path.Replace('/', '\\').TrimStart('\\');
-                            WriteItemObject(item, providerPath, item.IsFolder);
+                            WriteDropboxItemObject(item, providerPath, item.IsFolder);
                         }
                         return;
                     }
@@ -446,7 +481,7 @@ namespace DbxProvider.Provider
                 foreach (var item in items.Where(ItemKindMatches).OrderBy(i => !i.IsFolder).ThenBy(i => i.Name))
                 {
                     var providerPath = item.Path.Replace('/', '\\').TrimStart('\\');
-                    WriteItemObject(item, providerPath, item.IsFolder);
+                    WriteDropboxItemObject(item, providerPath, item.IsFolder);
                 }
             }
             catch (Exception ex)
@@ -499,7 +534,7 @@ namespace DbxProvider.Provider
                     {
                         var item = Run(ct => service.CreateFolderAsync(path, cancellationToken: ct));
                         GetCache()?.ApplyLocalAdd(item);
-                        WriteItemObject(item, item.Path.Replace('/', '\\').TrimStart('\\'), true);
+                        WriteDropboxItemObject(item, item.Path.Replace('/', '\\').TrimStart('\\'), true);
                     }
                 }
                 else
@@ -510,7 +545,7 @@ namespace DbxProvider.Provider
                         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
                         var item = Run(ct => service.UploadAsync(path, stream, cancellationToken: ct));
                         GetCache()?.ApplyLocalAdd(item);
-                        WriteItemObject(item, item.Path.Replace('/', '\\').TrimStart('\\'), false);
+                        WriteDropboxItemObject(item, item.Path.Replace('/', '\\').TrimStart('\\'), false);
                     }
                 }
             }
@@ -553,7 +588,7 @@ namespace DbxProvider.Provider
                 {
                     var item = Run(ct => service.CopyAsync(path, copyPath, cancellationToken: ct));
                     GetCache()?.ApplyLocalAdd(item);
-                    WriteItemObject(item, item.Path.Replace('/', '\\').TrimStart('\\'), item.IsFolder);
+                    WriteDropboxItemObject(item, item.Path.Replace('/', '\\').TrimStart('\\'), item.IsFolder);
                 }
             }
             catch (Exception ex)
@@ -574,7 +609,7 @@ namespace DbxProvider.Provider
                     var cache = GetCache();
                     cache?.ApplyLocalRemove(path);
                     cache?.ApplyLocalAdd(item);
-                    WriteItemObject(item, item.Path.Replace('/', '\\').TrimStart('\\'), item.IsFolder);
+                    WriteDropboxItemObject(item, item.Path.Replace('/', '\\').TrimStart('\\'), item.IsFolder);
                 }
             }
             catch (Exception ex)
@@ -597,7 +632,7 @@ namespace DbxProvider.Provider
                     var cache = GetCache();
                     cache?.ApplyLocalRemove(path);
                     cache?.ApplyLocalAdd(item);
-                    WriteItemObject(item, item.Path.Replace('/', '\\').TrimStart('\\'), item.IsFolder);
+                    WriteDropboxItemObject(item, item.Path.Replace('/', '\\').TrimStart('\\'), item.IsFolder);
                 }
             }
             catch (Exception ex)

@@ -49,7 +49,7 @@ namespace DbxProvider.Cmdlets
     }
 
     /// <summary>Performs batch copy operations in Dropbox.</summary>
-    [Cmdlet(VerbsCommon.Copy, "DropboxItemBatch")]
+    [Cmdlet(VerbsCommon.Copy, "DropboxItemBatch", SupportsShouldProcess = true)]
     [OutputType(typeof(DropboxItem))]
     public class CopyDropboxItemBatchCommand : DropboxCmdletBase
     {
@@ -77,11 +77,19 @@ namespace DbxProvider.Cmdlets
                     entries[i] = (FromPath[i], ToPath[i]);
                 }
 
+                if (!ShouldProcess(string.Join(", ", FromPath), "Batch copy")) return;
+
                 var service = GetService();
-                var items = Run(ct => service.CopyBatchAsync(entries, cancellationToken: ct));
-                foreach (var item in items)
+                var result = Run(ct => service.CopyBatchAsync(entries, cancellationToken: ct));
+                foreach (var item in result.Items)
                 {
                     WriteObject(item);
+                }
+                foreach (var failure in result.Failures)
+                {
+                    WriteError(new ErrorRecord(
+                        new InvalidOperationException($"Batch copy entry failed: {failure.Reason}"),
+                        "CopyBatchEntryFailed", ErrorCategory.WriteError, null));
                 }
             }
             catch (Exception ex) when (ex is not PipelineStoppedException)
@@ -93,7 +101,7 @@ namespace DbxProvider.Cmdlets
     }
 
     /// <summary>Performs batch move operations in Dropbox.</summary>
-    [Cmdlet(VerbsCommon.Move, "DropboxItemBatch")]
+    [Cmdlet(VerbsCommon.Move, "DropboxItemBatch", SupportsShouldProcess = true)]
     [OutputType(typeof(DropboxItem))]
     public class MoveDropboxItemBatchCommand : DropboxCmdletBase
     {
@@ -121,11 +129,19 @@ namespace DbxProvider.Cmdlets
                     entries[i] = (FromPath[i], ToPath[i]);
                 }
 
+                if (!ShouldProcess(string.Join(", ", FromPath), "Batch move")) return;
+
                 var service = GetService();
-                var items = Run(ct => service.MoveBatchAsync(entries, cancellationToken: ct));
-                foreach (var item in items)
+                var result = Run(ct => service.MoveBatchAsync(entries, cancellationToken: ct));
+                foreach (var item in result.Items)
                 {
                     WriteObject(item);
+                }
+                foreach (var failure in result.Failures)
+                {
+                    WriteError(new ErrorRecord(
+                        new InvalidOperationException($"Batch move entry failed: {failure.Reason}"),
+                        "MoveBatchEntryFailed", ErrorCategory.WriteError, null));
                 }
             }
             catch (Exception ex) when (ex is not PipelineStoppedException)

@@ -26,8 +26,7 @@ namespace DbxProvider.Cmdlets
             try
             {
                 var service = GetService();
-                var link = service.CreateSharedLinkAsync(Path, Visibility, Expires)
-                    .GetAwaiter().GetResult();
+                var link = Run(ct => service.CreateSharedLinkAsync(Path, Visibility, Expires, cancellationToken: ct));
                 WriteObject(link);
             }
             catch (Exception ex)
