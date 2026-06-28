@@ -909,32 +909,32 @@ namespace IntelliTect.Dropbox
         #region Batch Operations
 
         public virtual Task<DropboxBatchRelocationResult> CopyBatchAsync(IEnumerable<(string from, string to)> entries, CancellationToken cancellationToken = default) =>
-            RetryAsync(_ => CopyBatchCoreAsync(entries), cancellationToken);
+            RetryAsync(ct => CopyBatchCoreAsync(entries, ct), cancellationToken);
 
-        private async Task<DropboxBatchRelocationResult> CopyBatchCoreAsync(IEnumerable<(string from, string to)> entries)
+        private async Task<DropboxBatchRelocationResult> CopyBatchCoreAsync(IEnumerable<(string from, string to)> entries, CancellationToken cancellationToken)
         {
             var entryList = entries.ToList();
             var paths = entryList.Select(e => new RelocationPath(NormalizePath(e.from), NormalizePath(e.to))).ToList();
             var result = await _client.Files.CopyBatchV2Async(paths);
             if (result.IsAsyncJobId)
                 return await PollRelocationBatchAsync(result.AsAsyncJobId.Value,
-                    id => _client.Files.CopyBatchCheckV2Async(id), entryList);
+                    id => _client.Files.CopyBatchCheckV2Async(id), entryList, cancellationToken);
             // The batch completed synchronously: map its entries directly instead of
             // dropping them (which previously reported every item as missing output).
             return MapRelocationEntries(result.AsComplete.Value.Entries, entryList);
         }
 
         public virtual Task<DropboxBatchRelocationResult> MoveBatchAsync(IEnumerable<(string from, string to)> entries, CancellationToken cancellationToken = default) =>
-            RetryAsync(_ => MoveBatchCoreAsync(entries), cancellationToken);
+            RetryAsync(ct => MoveBatchCoreAsync(entries, ct), cancellationToken);
 
-        private async Task<DropboxBatchRelocationResult> MoveBatchCoreAsync(IEnumerable<(string from, string to)> entries)
+        private async Task<DropboxBatchRelocationResult> MoveBatchCoreAsync(IEnumerable<(string from, string to)> entries, CancellationToken cancellationToken)
         {
             var entryList = entries.ToList();
             var paths = entryList.Select(e => new RelocationPath(NormalizePath(e.from), NormalizePath(e.to))).ToList();
             var result = await _client.Files.MoveBatchV2Async(paths);
             if (result.IsAsyncJobId)
                 return await PollRelocationBatchAsync(result.AsAsyncJobId.Value,
-                    id => _client.Files.MoveBatchCheckV2Async(id), entryList);
+                    id => _client.Files.MoveBatchCheckV2Async(id), entryList, cancellationToken);
             return MapRelocationEntries(result.AsComplete.Value.Entries, entryList);
         }
 
@@ -1403,11 +1403,12 @@ namespace IntelliTect.Dropbox
 
         private async Task<DropboxBatchRelocationResult> PollRelocationBatchAsync(
             string jobId, Func<string, Task<RelocationBatchV2JobStatus>> checkFunc,
-            IReadOnlyList<(string from, string to)> entries)
+            IReadOnlyList<(string from, string to)> entries, CancellationToken cancellationToken)
         {
             while (true)
             {
-                await Task.Delay(500);
+                cancellationToken.ThrowIfCancellationRequested();
+                await Task.Delay(500, cancellationToken).ConfigureAwait(false);
                 var status = await checkFunc(jobId);
                 if (status.IsComplete)
                     return MapRelocationEntries(status.AsComplete.Value.Entries, entries);
