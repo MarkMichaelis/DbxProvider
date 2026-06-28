@@ -88,8 +88,8 @@ namespace DbxProvider.Cmdlets
                 foreach (var failure in result.Failures)
                 {
                     WriteError(new ErrorRecord(
-                        new InvalidOperationException($"Batch copy entry failed: {failure.Reason}"),
-                        "CopyBatchEntryFailed", ErrorCategory.WriteError, null));
+                        new InvalidOperationException($"Batch copy entry failed for '{failure.FromPath}' -> '{failure.ToPath}': {failure.Reason}"),
+                        "CopyBatchEntryFailed", ErrorCategory.WriteError, failure.FromPath));
                 }
             }
             catch (Exception ex) when (ex is not PipelineStoppedException)
@@ -140,8 +140,8 @@ namespace DbxProvider.Cmdlets
                 foreach (var failure in result.Failures)
                 {
                     WriteError(new ErrorRecord(
-                        new InvalidOperationException($"Batch move entry failed: {failure.Reason}"),
-                        "MoveBatchEntryFailed", ErrorCategory.WriteError, null));
+                        new InvalidOperationException($"Batch move entry failed for '{failure.FromPath}' -> '{failure.ToPath}': {failure.Reason}"),
+                        "MoveBatchEntryFailed", ErrorCategory.WriteError, failure.FromPath));
                 }
             }
             catch (Exception ex) when (ex is not PipelineStoppedException)

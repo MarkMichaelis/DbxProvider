@@ -185,4 +185,25 @@ public class DeleteBatchConcurrencyTests
         client.Completed.Should().BeTrue(
             "the in-flight chunk task must be awaited before DeleteBatchesAsync unwinds, not orphaned");
     }
+
+    [Fact]
+    public async Task DeleteBatchesAsync_WhenCancelledAfterAllChunksScheduled_StillThrows()
+    {
+        // With concurrency >= chunk count every chunk is scheduled without ever
+        // blocking on the gate, so no OperationCanceledException propagates from the
+        // loop. Cancellation requested afterwards must still surface (the method must
+        // not return as though the batch completed successfully). Without the explicit
+        // ThrowIfCancellationRequested the finally swallows the tasks' cancellation and
+        // the method returns normally, failing this test.
+        var started = new ManualResetEventSlim(false);
+        var client = new AwaitProbeClient(started);
+        var chunks = MakeChunks(2);
+        using var cts = new CancellationTokenSource();
+
+        var task = client.DeleteBatchesAsync(chunks, maxConcurrency: 4, cancellationToken: cts.Token);
+        started.Wait(TimeSpan.FromSeconds(5)).Should().BeTrue();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await task);
+    }
 }
