@@ -1,7 +1,7 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    Build DbxProvider fresh and launch Find-DropboxConflicts.ps1 in a child pwsh.
+    Build DbxProvider fresh and launch a child pwsh with the freshly-built module imported.
 
 .DESCRIPTION
     Your interactive pwsh session loads (and locks) DbxProvider.dll, so it keeps running
@@ -13,11 +13,18 @@
     pwsh process that imports that freshly-built module. Console-output / cmdlet / core
     changes therefore always take effect without restarting your main shell.
 
-    By default it runs the resume-delete smoke test:
+    By default it drops you into an interactive child pwsh with the fresh module imported
+    (no Find-DropboxConflicts run). Pass -FindConflicts to instead run the conflict-delete
+    pass:
         Find-DropboxConflicts.ps1 -Delete -SkipScan -Limit <Limit>
 
+.PARAMETER FindConflicts
+    Run Find-DropboxConflicts.ps1 -Delete -SkipScan -Limit <Limit> in the freshly-built child
+    pwsh instead of opening an interactive session. -ScriptArgs are appended so you can override
+    or extend the conflict-script arguments (e.g. -ScriptArgs '-WhatIf').
+
 .PARAMETER Limit
-    Value passed to -Limit. Default 100000.
+    Value passed to Find-DropboxConflicts.ps1 -Limit (only used with -FindConflicts). Default 100000.
 
 .PARAMETER Configuration
     Build configuration. Default 'Debug'.
@@ -35,28 +42,34 @@
     defaults (e.g. -ScriptArgs '-WhatIf' or -ScriptArgs '-Limit',1000).
 
 .PARAMETER NewWindow
-    Launch in a separate visible window that stays open (-NoExit). Without this, the command
-    runs in a child process attached to the current console and the window closes when done.
+    Launch in a separate visible window that stays open (-NoExit). Without this, the default
+    interactive session attaches to the current console; a -FindConflicts run attaches and the
+    window closes when the pass completes.
 
 .PARAMETER NewTab
     Launch in a new Windows Terminal tab (via wt.exe) instead of a separate window, so the run
-    sits alongside the current session. The tab stays open (-NoExit) so the live status line is
-    watchable. Falls back to -NewWindow (with a warning) when wt.exe is unavailable.
+    sits alongside the current session. The tab stays open (-NoExit). Falls back to -NewWindow
+    (with a warning) when wt.exe is unavailable.
+
+.EXAMPLE
+    .\run.ps1
+    Builds fresh and opens an interactive child pwsh with the module imported (no deletes).
 
 .EXAMPLE
     .\run.ps1 -NewWindow
-    Builds fresh and opens a separate window so you can watch the live status line.
+    Builds fresh and opens a separate interactive window with the module imported.
 
 .EXAMPLE
-    .\run.ps1 -NewTab
-    Builds fresh and opens a new Windows Terminal tab running the live status line.
+    .\run.ps1 -FindConflicts -NewTab
+    Builds fresh and opens a new Windows Terminal tab running the conflict-delete pass.
 
 .EXAMPLE
-    .\run.ps1 -Limit 1000 -ScriptArgs '-WhatIf'
-    Builds fresh and dry-runs 1000 items.
+    .\run.ps1 -FindConflicts -Limit 1000 -ScriptArgs '-WhatIf'
+    Builds fresh and dry-runs the conflict pass over 1000 items.
 #>
 [CmdletBinding()]
 param(
+    [switch]   $FindConflicts,
     [int]      $Limit = 100000,
     [string]   $Configuration = 'Debug',
     [switch]   $NoBuild,
@@ -67,6 +80,35 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+function New-ChildCommand {
+    # Builds the command string the freshly-built child pwsh runs. By default it imports the
+    # module and stays interactive (no deletes). With -FindConflicts it instead invokes the
+    # conflict-delete script (-Delete -Limit, plus any -ScriptArgs the caller appended).
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$ModulePath,
+        [switch]$FindConflicts,
+        [string]$ConflictScript,
+        [int]$Limit = 100000,
+        [string[]]$ScriptArgs
+    )
+
+    $prefix = "Set-Location -LiteralPath `"$RepoRoot`""
+    if (-not $FindConflicts) {
+        $note = "Write-Host 'DbxProvider module imported (fresh build). Run Find-DropboxConflicts.ps1 yourself if you need it.' -ForegroundColor Green"
+        return "$prefix; Import-Module `"$ModulePath`" -ErrorAction Stop; $note"
+    }
+
+    $invokeArgs = @('-Delete', '-SkipScan', '-Limit', $Limit)
+    if ($ScriptArgs) { $invokeArgs += $ScriptArgs }
+    $argLine = ($invokeArgs | ForEach-Object {
+            if ($_ -is [string] -and $_ -match '\s') { '"{0}"' -f $_ } else { "$_" }
+        }) -join ' '
+    return "$prefix; & `"$ConflictScript`" -ModulePath `"$ModulePath`" $argLine"
+}
 
 function New-WtTabArgumentList {
     # Builds the wt.exe argument list that opens a child pwsh in a new Windows Terminal
@@ -147,18 +189,15 @@ else {
         ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
-# Default invocation; -ScriptArgs (if any) are appended so the caller can override.
-$invokeArgs = @('-Delete', '-SkipScan', '-Limit', $Limit)
-if ($ScriptArgs) { $invokeArgs += $ScriptArgs }
-
-# Build a single command string for the child pwsh. Quote paths to survive spaces.
-$argLine = ($invokeArgs | ForEach-Object {
-        if ($_ -is [string] -and $_ -match '\s') { '"{0}"' -f $_ } else { "$_" }
-    }) -join ' '
-$command = "Set-Location -LiteralPath `"$repoRoot`"; & `"$script`" -ModulePath `"$ModulePath`" $argLine"
+# Build the command the child pwsh runs: interactive module import by default, or the
+# conflict-delete pass when -FindConflicts is supplied (-ScriptArgs appended either way).
+$command = New-ChildCommand -RepoRoot $repoRoot -ModulePath $ModulePath `
+    -FindConflicts:$FindConflicts -ConflictScript $script -Limit $Limit -ScriptArgs $ScriptArgs
+$launchDesc = if ($FindConflicts) { "$script (-Delete -Limit $Limit)" } else { 'an interactive pwsh with DbxProvider imported' }
 
 $pwsh = (Get-Process -Id $PID).Path   # use the same pwsh executable that's running this script
-$baseArgs = @('-NoProfile', '-Command', $command)
+# Default (interactive) sessions keep the child alive with -NoExit; the conflict pass runs and exits.
+$baseArgs = if ($FindConflicts) { @('-NoProfile', '-Command', $command) } else { @('-NoProfile', '-NoExit', '-Command', $command) }
 
 if ($NewTab) {
     $wt = Get-Command wt.exe -ErrorAction SilentlyContinue
@@ -178,7 +217,7 @@ if ($NewTab) {
 
         $wtArgs = New-WtTabArgumentList -PwshPath $pwsh -ScriptPath $tabScript -Title 'DbxProvider'
         Start-Process -FilePath $wt.Source -ArgumentList $wtArgs
-        Write-Host "Launched a new Windows Terminal tab running: $script $argLine" -ForegroundColor Cyan
+        Write-Host "Launched a new Windows Terminal tab running: $launchDesc" -ForegroundColor Cyan
         return
     }
     Write-Warning "Windows Terminal (wt.exe) not found; falling back to a new window."
@@ -186,8 +225,8 @@ if ($NewTab) {
 }
 
 if ($NewWindow) {
-    Start-Process -FilePath $pwsh -ArgumentList (@('-NoExit') + $baseArgs)
-    Write-Host "Launched a new pwsh window running: $script $argLine" -ForegroundColor Cyan
+    Start-Process -FilePath $pwsh -ArgumentList (@('-NoExit') + @('-NoProfile', '-Command', $command))
+    Write-Host "Launched a new pwsh window running: $launchDesc" -ForegroundColor Cyan
 }
 else {
     & $pwsh @baseArgs

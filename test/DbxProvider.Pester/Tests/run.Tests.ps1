@@ -27,3 +27,29 @@ Describe 'run.ps1 New-WtTabArgumentList' {
         $args | Should -Contain '"C:\Program Files\PowerShell\7\pwsh.exe"'
     }
 }
+
+Describe 'run.ps1 New-ChildCommand' {
+
+    It 'defaults to importing the module interactively and never deletes' {
+        $cmd = New-ChildCommand -RepoRoot 'C:\Repo' -ModulePath 'C:\Build\DbxProvider.psd1' `
+            -ConflictScript 'C:\Repo\Find-DropboxConflicts.ps1'
+        $cmd | Should -Match 'Import-Module'
+        $cmd | Should -Not -Match '-Delete'
+        $cmd | Should -Not -Match '&\s*"[^"]*Find-DropboxConflicts\.ps1"'
+    }
+
+    It 'runs the conflict-delete pass only when -FindConflicts is supplied' {
+        $cmd = New-ChildCommand -RepoRoot 'C:\Repo' -ModulePath 'C:\Build\DbxProvider.psd1' `
+            -ConflictScript 'C:\Repo\Find-DropboxConflicts.ps1' -FindConflicts -Limit 1000
+        $cmd | Should -Match 'Find-DropboxConflicts\.ps1'
+        $cmd | Should -Match '-Delete'
+        $cmd | Should -Match '-Limit 1000'
+        $cmd | Should -Not -Match 'Import-Module'
+    }
+
+    It 'appends -ScriptArgs to the conflict pass so the caller can override' {
+        $cmd = New-ChildCommand -RepoRoot 'C:\Repo' -ModulePath 'C:\Build\DbxProvider.psd1' `
+            -ConflictScript 'C:\Repo\Find-DropboxConflicts.ps1' -FindConflicts -ScriptArgs '-WhatIf'
+        $cmd | Should -Match '-WhatIf'
+    }
+}
