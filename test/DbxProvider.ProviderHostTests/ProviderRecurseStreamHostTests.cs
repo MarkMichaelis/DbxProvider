@@ -91,10 +91,18 @@ Set-Location ([System.IO.Path]::GetTempPath())
     {
         var fake = new FakeDropboxServiceClient(Tree());
         using var ps = NewHost(fake);
-        ps.AddScript(Setup + "Get-ChildItem -LiteralPath 'Dbx:\\Root' -Recurse | Out-Null");
+        ps.AddScript(Setup);
+        ps.Invoke();
+        Assert.False(ps.HadErrors, Errors(ps));
+
+        // Snapshot immediately before the enumeration so the assertion measures only
+        // the recursive Get-ChildItem, independent of any setup-time API usage.
+        var before = fake.RecursiveListFolderCalls;
+        ps.Commands.Clear();
+        ps.AddScript("Get-ChildItem -LiteralPath 'Dbx:\\Root' -Recurse | Out-Null");
         ps.Invoke();
 
         Assert.False(ps.HadErrors, Errors(ps));
-        Assert.Equal(0, fake.RecursiveListFolderCalls);
+        Assert.Equal(before, fake.RecursiveListFolderCalls);
     }
 }

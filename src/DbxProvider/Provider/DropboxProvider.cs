@@ -551,7 +551,8 @@ namespace DbxProvider.Provider
                 if (Stopping) yield break;
 
                 var folder = pending.Pop();
-                var children = SortDirectory(cache.GetChildren(folder)).ToList();
+                var children = cache.GetChildren(folder);
+                SortDirectory(children);
                 foreach (var child in children)
                 {
                     yield return child;
@@ -565,10 +566,17 @@ namespace DbxProvider.Provider
             }
         }
 
-        /// <summary>Orders one directory's children: sub-folders first, then files,
-        /// alphabetical by name within each group.</summary>
-        private static IEnumerable<DropboxItem> SortDirectory(List<DropboxItem> directory) =>
-            directory.OrderBy(i => !i.IsFolder).ThenBy(i => i.Name);
+        /// <summary>Orders one directory's children in place: sub-folders first, then
+        /// files, alphabetical by name within each group. Sorting the list
+        /// <see cref="MetadataCache.GetChildren(string, System.Threading.CancellationToken)"/>
+        /// already returns avoids the extra buffer a LINQ <c>OrderBy</c> would allocate,
+        /// keeping per-directory peak memory minimal. The name comparison matches
+        /// <c>OrderBy(...).ThenBy(i =&gt; i.Name)</c> (default string comparer).</summary>
+        private static void SortDirectory(List<DropboxItem> directory) =>
+            directory.Sort(static (a, b) =>
+                a.IsFolder != b.IsFolder
+                    ? (a.IsFolder ? -1 : 1)
+                    : Comparer<string>.Default.Compare(a.Name, b.Name));
 
         protected override void GetChildNames(string path, ReturnContainers returnContainers)
         {
