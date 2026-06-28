@@ -240,21 +240,16 @@ namespace DbxProvider.Provider
         /// </summary>
         private void WriteDropboxItemObject(DropboxItem item, string providerPath, bool isContainer)
         {
-            var pso = PSObject.AsPSObject(item);
-            pso.Properties.Add(new PSNoteProperty("DropboxPath", item.Path));
-            pso.Properties.Add(new PSNoteProperty("Path", ToDriveQualifiedPath(item.Path)));
+            var pso = DropboxItemShaping.ToDriveQualifiedPSObject(item, ResolveDriveName());
             WriteItemObject(pso, providerPath, isContainer);
         }
 
-        /// <summary>Converts a Dropbox API path (<c>/Folder/file</c>) to a
-        /// drive-qualified provider path (<c>Dbx:\Folder\file</c>) for the active drive.</summary>
-        private string ToDriveQualifiedPath(string apiPath)
-        {
-            var driveName = (PSDriveInfo as DropboxDriveInfo)?.Name
-                ?? ResolveDriveInfo()?.Name
-                ?? "Dbx";
-            return driveName + ":" + (apiPath ?? string.Empty).Replace('/', '\\');
-        }
+        /// <summary>Resolves the active drive name (e.g. <c>Dbx</c>), falling back to
+        /// the default when no drive is in scope.</summary>
+        private string ResolveDriveName() =>
+            (PSDriveInfo as DropboxDriveInfo)?.Name
+            ?? ResolveDriveInfo()?.Name
+            ?? "Dbx";
 
         protected override bool IsValidPath(string path)
         {
@@ -390,7 +385,7 @@ namespace DbxProvider.Provider
             int firstWildcard = -1;
             for (int i = 0; i < segments.Length; i++)
             {
-                if (WildcardPattern.ContainsWildcardCharacters(segments[i]))
+                if (ContainsRoutingWildcard(segments[i]))
                 {
                     firstWildcard = i;
                     break;
@@ -404,6 +399,26 @@ namespace DbxProvider.Provider
             // search_v2 is recursive within the scope.
             pattern = segments.Last();
             return true;
+        }
+
+        /// <summary>
+        /// Reports whether a path segment carries a genuine globbing wildcard
+        /// (<c>*</c> or <c>?</c>) that should route recursive enumeration to
+        /// search_v2. Unlike <see cref="WildcardPattern.ContainsWildcardCharacters"/>,
+        /// this deliberately ignores <c>[</c>/<c>]</c> so a literal bracketed folder
+        /// name (e.g. <c>[archive]</c>) enumerates normally instead of being capped at
+        /// 1000 search hits (issue #90). A backtick escapes the following character so
+        /// an escaped <c>`*</c> is treated as a literal.
+        /// </summary>
+        private static bool ContainsRoutingWildcard(string segment)
+        {
+            for (int i = 0; i < segment.Length; i++)
+            {
+                char c = segment[i];
+                if (c == '`') { i++; continue; }
+                if (c == '*' || c == '?') return true;
+            }
+            return false;
         }
 
         private NoSearchDynamicParameters? GetNoSearchParams()
