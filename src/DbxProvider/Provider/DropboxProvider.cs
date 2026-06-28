@@ -490,18 +490,18 @@ namespace DbxProvider.Provider
 
                 var cache = GetCache();
 
-                // Recursive enumeration streams from the local metadata cache so a
-                // very large subtree is never buffered entirely in memory. Items are
-                // yielded per directory (each cache row is one folder's children) and
-                // only one directory's children are sorted at a time, so peak memory is
-                // bounded by the largest single folder rather than the whole subtree.
-                // The cache is the source of truth here -- build/refresh it for current
-                // data (Build-DropboxCache).
+                // Recursive enumeration walks the subtree one directory at a time so a
+                // very large account is never buffered entirely in memory. Each folder's
+                // children are fetched live (cursor-validated and cached) and sorted on
+                // their own; peak memory is bounded by the largest single folder plus the
+                // pending-folder stack, rather than the whole subtree, and items stream as
+                // they are read instead of being collected and globally sorted first.
                 if (recurse && cache != null && cache.Options.Enabled)
                 {
                     WriteVerbose($"Get-ChildItem: streaming recursive enumeration from cache (path='{path}')");
-                    foreach (var item in StreamPerDirectorySorted(cache.EnumerateItems(path)).Where(ItemKindMatches))
+                    foreach (var item in StreamRecursiveFromCache(cache, path))
                     {
+                        if (!ItemKindMatches(item)) continue;
                         var providerPath = item.Path.Replace('/', '\\').TrimStart('\\');
                         WriteDropboxItemObject(item, providerPath, item.IsFolder);
                     }
@@ -531,46 +531,44 @@ namespace DbxProvider.Provider
         }
 
         /// <summary>
-        /// Streams items grouped by their immediate parent directory, emitting each
-        /// directory's sub-folders first and then its files (alphabetical within each
-        /// group). The input must already be ordered so that all children of a
-        /// directory are contiguous -- as <see cref="MetadataCache.EnumerateItems"/>
-        /// yields them (one row per folder, ordered by path). Only a single directory's
-        /// children are buffered at a time, so peak memory is bounded by the largest
-        /// folder rather than the entire subtree.
+        /// Streams a subtree from the metadata cache one directory at a time using an
+        /// explicit stack (depth-first, pre-order). Each directory's children are
+        /// fetched live by <see cref="MetadataCache.GetChildren(string, System.Threading.CancellationToken)"/>
+        /// (cursor-validated and cached), sorted sub-folders-first then files, and
+        /// yielded before descending into its sub-folders in order. Only one directory's
+        /// children plus the pending-folder stack are held, so peak memory is bounded by
+        /// the largest single folder rather than the whole subtree, and the walk honors
+        /// Ctrl+C via <see cref="System.Management.Automation.Provider.CmdletProvider.Stopping"/>.
+        /// The per-folder API cost on large cold subtrees is tracked for optimization in
+        /// issue #93.
         /// </summary>
-        private static IEnumerable<DropboxItem> StreamPerDirectorySorted(IEnumerable<DropboxItem> items)
+        private IEnumerable<DropboxItem> StreamRecursiveFromCache(MetadataCache cache, string startPath)
         {
-            string? currentParent = null;
-            var bucket = new List<DropboxItem>();
-            foreach (var item in items)
+            var pending = new Stack<string>();
+            pending.Push(startPath);
+            while (pending.Count > 0)
             {
-                var parent = ApiParentPath(item.Path);
-                if (currentParent != null && !string.Equals(parent, currentParent, StringComparison.Ordinal))
+                if (Stopping) yield break;
+
+                var folder = pending.Pop();
+                var children = SortDirectory(cache.GetChildren(folder)).ToList();
+                foreach (var child in children)
                 {
-                    foreach (var sorted in SortDirectory(bucket)) yield return sorted;
-                    bucket.Clear();
+                    yield return child;
                 }
-                currentParent = parent;
-                bucket.Add(item);
+
+                // Push sub-folders in reverse so they pop (and emit) in sorted order.
+                for (int i = children.Count - 1; i >= 0; i--)
+                {
+                    if (children[i].IsFolder) pending.Push(children[i].Path);
+                }
             }
-            foreach (var sorted in SortDirectory(bucket)) yield return sorted;
         }
 
         /// <summary>Orders one directory's children: sub-folders first, then files,
         /// alphabetical by name within each group.</summary>
         private static IEnumerable<DropboxItem> SortDirectory(List<DropboxItem> directory) =>
             directory.OrderBy(i => !i.IsFolder).ThenBy(i => i.Name);
-
-        /// <summary>Returns the immediate parent of a Dropbox API path
-        /// (<c>/A/B/file</c> -> <c>/A/B</c>); the root and empty paths map to <c>""</c>.</summary>
-        private static string ApiParentPath(string path)
-        {
-            if (string.IsNullOrEmpty(path)) return "";
-            var trimmed = path.TrimEnd('/');
-            int slash = trimmed.LastIndexOf('/');
-            return slash <= 0 ? "" : trimmed.Substring(0, slash);
-        }
 
         protected override void GetChildNames(string path, ReturnContainers returnContainers)
         {

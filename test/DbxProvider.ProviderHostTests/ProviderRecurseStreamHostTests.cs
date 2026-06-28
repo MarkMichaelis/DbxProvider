@@ -27,6 +27,9 @@ public class ProviderRecurseStreamHostTests : IDisposable
         catch { /* best effort */ }
     }
 
+    // Note: the cache is initialized but NOT pre-built, so recursive enumeration must
+    // fetch each folder's children live (as the provider does in production). This
+    // mirrors the regression where a just-created nested file must still be returned.
     private const string Setup = @"
 $ErrorActionPreference = 'Stop'
 Import-Module $dllPath
@@ -37,7 +40,6 @@ $opts = [IntelliTect.Dropbox.CacheOptions]::new()
 $opts.RootDirectoryOverride = $cacheDir
 $dbx.InitializeCache('fake-account', 'fake@example.com', $opts)
 $ExecutionContext.SessionState.Drive.New($dbx, 'global') | Out-Null
-Build-DropboxCache -Path '/' | Out-Null
 Set-Location ([System.IO.Path]::GetTempPath())
 ";
 
