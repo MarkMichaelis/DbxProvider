@@ -532,13 +532,13 @@ namespace DbxProvider.Provider
 
         /// <summary>
         /// Streams a subtree from the metadata cache one directory at a time using an
-        /// explicit stack (depth-first, pre-order). Each directory's children are
-        /// fetched live by <see cref="MetadataCache.GetChildren(string, System.Threading.CancellationToken)"/>
-        /// (cursor-validated and cached), sorted sub-folders-first then files, and
-        /// yielded before descending into its sub-folders in order. Only one directory's
-        /// children plus the pending-folder stack are held, so peak memory is bounded by
-        /// the largest single folder rather than the whole subtree, and the walk honors
-        /// Ctrl+C via <see cref="System.Management.Automation.Provider.CmdletProvider.Stopping"/>.
+        /// explicit stack. Each directory's children are fetched live by
+        /// <see cref="MetadataCache.GetChildren(string, System.Threading.CancellationToken)"/>
+        /// (cursor-validated and cached) and emitted sub-folders-first then files
+        /// (alphabetical) before the walk descends into those sub-folders. Only one
+        /// directory's children plus the pending-folder stack are held, so peak memory is
+        /// bounded by the largest single folder rather than the whole subtree, and the
+        /// walk honors Ctrl+C via <see cref="System.Management.Automation.Provider.CmdletProvider.Stopping"/>.
         /// The per-folder API cost on large cold subtrees is tracked for optimization in
         /// issue #93.
         /// </summary>
