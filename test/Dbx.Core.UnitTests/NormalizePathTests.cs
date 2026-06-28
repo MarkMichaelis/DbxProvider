@@ -51,4 +51,26 @@ public class NormalizePathTests
     {
         DropboxServiceClient.NormalizePath("A\\b.txt").Should().Be("/A/b.txt");
     }
+
+    [Theory]
+    // Drive-qualified provider paths produced by WriteDropboxItem / WriteItemObject
+    // when an item is piped from a provider/cmdlet into a Dropbox API cmdlet. The
+    // drive qualifier (e.g. "Dbx:") must be stripped so the API receives a real
+    // Dropbox path -- without this the path became "/Dbx:/A/b.txt", which the API
+    // rejects, so "Search-Dropbox 'x' | Get-DropboxRevision" returned nothing.
+    [InlineData("Dbx:\\A\\b.txt")]
+    [InlineData("Dbx:/A/b.txt")]
+    [InlineData("Dbx:A\\b.txt")]
+    public void DriveQualified_StripsDrivePrefix(string input)
+    {
+        DropboxServiceClient.NormalizePath(input).Should().Be("/A/b.txt");
+    }
+
+    [Theory]
+    [InlineData("Dbx:")]
+    [InlineData("Dbx:\\")]
+    public void DriveQualifiedRoot_NormalizesToEmpty(string input)
+    {
+        DropboxServiceClient.NormalizePath(input).Should().Be("");
+    }
 }

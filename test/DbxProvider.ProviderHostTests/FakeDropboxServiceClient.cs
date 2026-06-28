@@ -37,7 +37,15 @@ public class FakeDropboxServiceClient : DropboxServiceClient
     {
         /// <summary>Number of bytes uploaded.</summary>
         public long Length => Content.Length;
+
+        /// <summary>The Dropbox write mode tag the upload was issued with (e.g. "overwrite", "add"), when known.</summary>
+        public string? Mode { get; init; }
     }
+
+    /// <summary>In-memory file content keyed by normalized path, so the content
+    /// reader/writer round-trips (download then upload) can be exercised offline.
+    /// Seed an entry to simulate an existing file for append tests.</summary>
+    public Dictionary<string, byte[]> FileBytes { get; } = new(System.StringComparer.Ordinal);
 
     public FakeDropboxServiceClient(IEnumerable<DropboxItem> items)
         : base((Dropbox.Api.DropboxClient)null!)
@@ -151,7 +159,8 @@ public class FakeDropboxServiceClient : DropboxServiceClient
         using var captured = new System.IO.MemoryStream();
         content.CopyTo(captured); // copies from the stream's current position, as the real upload would
         var bytes = captured.ToArray();
-        Uploads.Add(new UploadRecord(norm, bytes));
+        Uploads.Add(new UploadRecord(norm, bytes) { Mode = DescribeMode(mode) });
+        FileBytes[norm] = bytes;
 
         var item = new DropboxItem
         {
@@ -165,6 +174,38 @@ public class FakeDropboxServiceClient : DropboxServiceClient
         _items.Add(item);
         return Task.FromResult(item);
     }
+
+    private static string? DescribeMode(WriteMode? mode)
+    {
+        if (mode == null) return null;
+        if (mode.IsOverwrite) return "overwrite";
+        if (mode.IsAdd) return "add";
+        if (mode.IsUpdate) return "update";
+        return mode.ToString();
+    }
+
+    /// <summary>Returns the in-memory content for a path (or throws if absent),
+    /// mirroring a real download so the content reader and append-writer work offline.</summary>
+    public override Task<(System.IO.Stream Content, DropboxItem Metadata)> DownloadAsync(string path, CancellationToken cancellationToken = default)
+    {
+        var norm = NormalizePath(path);
+        if (!FileBytes.TryGetValue(norm, out var bytes))
+            throw new System.IO.FileNotFoundException("Not found: " + norm);
+        var item = _items.FirstOrDefault(i => i.Path == norm)
+            ?? new DropboxItem { Name = norm.TrimStart('/'), Path = norm, IsFolder = false, Id = "id:" + norm, Length = (ulong)bytes.Length };
+        return Task.FromResult(((System.IO.Stream)new System.IO.MemoryStream(bytes, writable: false), item));
+    }
+
+    /// <summary>Scripted batch copy/move results keyed by nothing -- returns
+    /// <see cref="NextRelocationResult"/> so tests can inject successes and
+    /// failures and assert how the cmdlet surfaces them.</summary>
+    public DropboxBatchRelocationResult? NextRelocationResult { get; set; }
+
+    public override Task<DropboxBatchRelocationResult> CopyBatchAsync(IEnumerable<(string from, string to)> entries, CancellationToken cancellationToken = default) =>
+        Task.FromResult(NextRelocationResult ?? new DropboxBatchRelocationResult(new List<DropboxItem>(), new List<DropboxBatchRelocationError>()));
+
+    public override Task<DropboxBatchRelocationResult> MoveBatchAsync(IEnumerable<(string from, string to)> entries, CancellationToken cancellationToken = default) =>
+        Task.FromResult(NextRelocationResult ?? new DropboxBatchRelocationResult(new List<DropboxItem>(), new List<DropboxBatchRelocationError>()));
 
     private static string Parent(string normalizedPath)
     {

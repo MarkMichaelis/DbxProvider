@@ -59,7 +59,7 @@ namespace DbxProvider.Cmdlets
     }
 
     /// <summary>Uploads a local file to Dropbox with large-file support.</summary>
-    [Cmdlet(VerbsLifecycle.Invoke, "DropboxUpload")]
+    [Cmdlet(VerbsLifecycle.Invoke, "DropboxUpload", SupportsShouldProcess = true)]
     [OutputType(typeof(DropboxItem))]
     public class InvokeDropboxUploadCommand : DropboxCmdletBase
     {
@@ -69,11 +69,14 @@ namespace DbxProvider.Cmdlets
         [Parameter(Mandatory = true, Position = 1)]
         public string DropboxPath { get; set; } = string.Empty;
 
+        /// <summary>Forces an overwrite of any existing file regardless of <see cref="WriteMode"/>.</summary>
         [Parameter]
         public SwitchParameter Force { get; set; }
 
+        /// <summary>How to write the file: <c>add</c> keeps an existing file (uploading
+        /// to an auto-renamed path on conflict); <c>overwrite</c> replaces it.</summary>
         [Parameter]
-        [ValidateSet("add", "overwrite", "update")]
+        [ValidateSet("add", "overwrite")]
         public string WriteMode { get; set; } = "overwrite";
 
         protected override void ProcessRecord()
@@ -90,12 +93,14 @@ namespace DbxProvider.Cmdlets
                     return;
                 }
 
-                Dropbox.Api.Files.WriteMode mode = WriteMode.ToLowerInvariant() switch
-                {
-                    "add" => Dropbox.Api.Files.WriteMode.Add.Instance,
-                    "overwrite" => Dropbox.Api.Files.WriteMode.Overwrite.Instance,
-                    _ => Dropbox.Api.Files.WriteMode.Overwrite.Instance
-                };
+                // -Force forces overwrite; otherwise honor the validated WriteMode.
+                bool overwrite = Force.IsPresent
+                    || WriteMode.Equals("overwrite", StringComparison.OrdinalIgnoreCase);
+                Dropbox.Api.Files.WriteMode mode = overwrite
+                    ? Dropbox.Api.Files.WriteMode.Overwrite.Instance
+                    : Dropbox.Api.Files.WriteMode.Add.Instance;
+
+                if (!ShouldProcess(DropboxPath, overwrite ? "Upload (overwrite)" : "Upload (add)")) return;
 
                 var service = GetService();
                 using var stream = File.OpenRead(resolvedSource);

@@ -141,20 +141,48 @@ public class DeleteBatchConcurrencyTests
         }
     }
 
-    [Fact]
-    public async Task DeleteBatchesAsync_ConvertsChunkException_ToPerPathFailures_WithoutAbortingOtherChunks()
+    /// <summary>Test double that signals when a delete starts, then completes after
+    /// a fixed delay (ignoring cancellation) so a test can prove the started task is
+    /// awaited rather than orphaned when the batch loop is cancelled.</summary>
+    private sealed class AwaitProbeClient : DropboxServiceClient
     {
-        // When one chunk's delete throws, its paths must surface as per-path failures
-        // (with the real paths) while the other chunks still complete -- never abort
-        // the whole window and lose those paths. Reverting to a bare try/finally lets
-        // the exception escape Task.WhenAll, so DeleteBatchesAsync throws and this fails.
-        var client = new ThrowingProbeClient(throwForChunkPrefix: "/chunk1/");
-        var chunks = MakeChunks(3);
+        private readonly ManualResetEventSlim _started;
 
-        var failures = await client.DeleteBatchesAsync(chunks, maxConcurrency: 3);
+        public AwaitProbeClient(ManualResetEventSlim started)
+            : base((Dropbox.Api.DropboxClient)null!) => _started = started;
 
-        failures.Select(f => f.Path).Should().BeEquivalentTo(new[] { "/chunk1/a", "/chunk1/b" },
-            "the failing chunk's real paths are preserved as failures");
-        failures.Should().OnlyContain(f => f.Reason == "batch delete job failed");
+        public volatile bool Completed;
+
+        public override async Task<IReadOnlyList<DropboxBatchDeleteError>> DeleteBatchAsync(
+            IEnumerable<string> paths, Action<int>? onItemsProcessed = null,
+            CancellationToken cancellationToken = default)
+        {
+            _started.Set();
+            await Task.Delay(200).ConfigureAwait(false); // intentionally ignores cancellationToken
+            Completed = true;
+            return Array.Empty<DropboxBatchDeleteError>();
+        }
+    }
+
+    [Fact]
+    public async Task DeleteBatchesAsync_WhenCancelledMidLoop_AwaitsStartedTasks_NotOrphaned()
+    {
+        // maxConcurrency=1 with two chunks: the first chunk acquires the gate and
+        // starts; the second chunk's gate.WaitAsync throws on cancellation. The fix
+        // awaits the already-started task in a finally, so by the time the method
+        // unwinds the started task has completed. Reverting the finally lets the
+        // method throw immediately, orphaning the in-flight task (Completed == false).
+        var started = new ManualResetEventSlim(false);
+        var client = new AwaitProbeClient(started);
+        var chunks = MakeChunks(2);
+        using var cts = new CancellationTokenSource();
+
+        var task = client.DeleteBatchesAsync(chunks, maxConcurrency: 1, cancellationToken: cts.Token);
+        started.Wait(TimeSpan.FromSeconds(5)).Should().BeTrue();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await task);
+        client.Completed.Should().BeTrue(
+            "the in-flight chunk task must be awaited before DeleteBatchesAsync unwinds, not orphaned");
     }
 }

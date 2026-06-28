@@ -62,8 +62,7 @@ namespace DbxProvider.Cmdlets
             {
                 var service = GetService();
                 var bytes = Encoding.UTF8.GetBytes(Content);
-                var url = service.UpdatePaperDocAsync(Path, bytes, ImportFormat, UpdatePolicy)
-                    .GetAwaiter().GetResult();
+                var url = Run(ct => service.UpdatePaperDocAsync(Path, bytes, ImportFormat, UpdatePolicy, cancellationToken: ct));
                 WriteObject(url);
                 WriteVerbose($"Updated Paper doc at {Path}: {url}");
             }
