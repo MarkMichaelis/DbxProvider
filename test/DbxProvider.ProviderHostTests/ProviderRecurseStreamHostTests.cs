@@ -87,7 +87,7 @@ Set-Location ([System.IO.Path]::GetTempPath())
     }
 
     [Fact]
-    public void GetChildItem_Recurse_StreamsFromCache_DoesNotCallRecursiveListApi()
+    public void GetChildItem_Recurse_DoesNotCallRecursiveListApi()
     {
         var fake = new FakeDropboxServiceClient(Tree());
         using var ps = NewHost(fake);
