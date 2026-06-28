@@ -102,23 +102,14 @@ namespace DbxProvider.Cmdlets
         protected void WriteDropboxItem(DropboxItem item)
         {
             if (item == null) throw new ArgumentNullException(nameof(item));
-
-            var pso = PSObject.AsPSObject(item);
-            // Preserve the raw API path before shadowing Path so callers that need
-            // the Dropbox-relative form still have it.
-            pso.Properties.Add(new PSNoteProperty("DropboxPath", item.Path));
-            // Shadow the adapted CLR Path with the drive-qualified, Remove-Item-able
-            // value. A PSNoteProperty with the same name takes precedence over the
-            // adapted member for both member access and pipeline binding.
-            pso.Properties.Add(new PSNoteProperty("Path", ToDriveQualifiedPath(item.Path)));
-            WriteObject(pso);
+            WriteObject(DropboxItemShaping.ToDriveQualifiedPSObject(item, DriveName));
         }
 
         /// <summary>Converts a Dropbox API path (<c>/Folder/file</c>) to a
         /// drive-qualified provider path for this cmdlet's drive
         /// (<c>Dbx:\Folder\file</c>). The inverse of <see cref="StripDrivePrefix"/>.</summary>
         internal string ToDriveQualifiedPath(string apiPath) =>
-            DriveName + ":" + (apiPath ?? string.Empty).Replace('/', '\\');
+            DropboxItemShaping.ToDriveQualifiedPath(apiPath, DriveName);
 
         /// <summary>Reports whether a query string contains a PowerShell wildcard
         /// metacharacter (<c>*</c>, <c>?</c> or <c>[</c>). Cache-backed finders use
