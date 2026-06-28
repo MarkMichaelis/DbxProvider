@@ -555,6 +555,7 @@ namespace DbxProvider.Provider
                 SortDirectory(children);
                 foreach (var child in children)
                 {
+                    if (Stopping) yield break;
                     yield return child;
                 }
 
