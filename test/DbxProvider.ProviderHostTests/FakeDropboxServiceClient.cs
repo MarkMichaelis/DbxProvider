@@ -225,11 +225,12 @@ public class FakeDropboxServiceClient : DropboxServiceClient
     /// <summary>Number of times the recursive overload of <see cref="ListFolderAsync"/>
     /// was invoked, so tests can prove recursive enumeration is served from the cache
     /// (streaming) rather than the recursive list API.</summary>
-    public int RecursiveListFolderCalls { get; private set; }
+    public int RecursiveListFolderCalls => _recursiveListFolderCalls;
+    private int _recursiveListFolderCalls;
 
     public override Task<List<DropboxItem>> ListFolderAsync(string path, bool recursive = false, bool includeDeleted = false, CancellationToken cancellationToken = default)
     {
-        if (recursive) RecursiveListFolderCalls++;
+        if (recursive) Interlocked.Increment(ref _recursiveListFolderCalls);
         var norm = NormalizePath(path); // "" for root, "/A" otherwise
         var children = recursive
             ? _items.Where(i => IsUnder(i.Path, norm) && i.Path != norm).ToList()

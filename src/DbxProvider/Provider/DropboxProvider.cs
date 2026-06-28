@@ -551,7 +551,7 @@ namespace DbxProvider.Provider
                 if (Stopping) yield break;
 
                 var folder = pending.Pop();
-                var children = cache.GetChildren(folder);
+                var children = Run(ct => cache.GetChildrenAsync(folder, ct));
                 SortDirectory(children);
                 foreach (var child in children)
                 {
