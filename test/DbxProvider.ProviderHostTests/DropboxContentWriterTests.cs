@@ -51,4 +51,34 @@ public class DropboxContentWriterTests
         Assert.Single(fake.Uploads);
         Assert.Equal(0, fake.Uploads[0].Length);
     }
+
+    [Fact]
+    public void LargeContent_SpoolsToTempFileOnDisk_NotRam_ThenUploadsRoundTrip()
+    {
+        var fake = new FakeDropboxServiceClient(new List<DropboxItem>());
+        var spoolDir = Path.Combine(Path.GetTempPath(), "DbxSpoolTests-" + System.Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(spoolDir);
+        try
+        {
+            var writer = new DropboxContentWriter(fake, "/A/big.bin", raw: true, spoolDirectory: spoolDir);
+            var payload = new byte[2 * 1024 * 1024];
+            for (int i = 0; i < payload.Length; i++) payload[i] = (byte)(i % 251);
+
+            writer.Write(new List<object> { payload });
+
+            // The upload is spooled to disk, so a temp file exists before close.
+            Assert.NotEmpty(Directory.GetFiles(spoolDir));
+
+            writer.Close();
+
+            // The temp file is cleaned up after close, and the upload round-trips.
+            Assert.Empty(Directory.GetFiles(spoolDir));
+            var upload = Assert.Single(fake.Uploads);
+            Assert.Equal(payload, upload.Content);
+        }
+        finally
+        {
+            try { Directory.Delete(spoolDir, recursive: true); } catch { /* best effort */ }
+        }
+    }
 }
