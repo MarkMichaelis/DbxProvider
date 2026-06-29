@@ -7,12 +7,14 @@ using System.Text;
 
 namespace DbxProvider.Provider
 {
-    /// <summary>Writes content to a Dropbox file.</summary>
+    /// <summary>Writes content to a Dropbox file. Content is spooled to a temporary
+    /// file on disk (deleted on close) rather than buffered entirely in RAM, so very
+    /// large uploads do not exhaust memory; the spooled stream is then uploaded.</summary>
     public class DropboxContentWriter : IContentWriter
     {
         private readonly DropboxServiceClient _service;
         private readonly string _path;
-        private MemoryStream _buffer;
+        private readonly Stream _buffer;
         private StreamWriter? _writer;
         private bool _disposed;
         private readonly bool _raw;
@@ -20,16 +22,20 @@ namespace DbxProvider.Provider
         private bool _appendLoaded;
         private bool _writeFailed;
 
-        public DropboxContentWriter(DropboxServiceClient service, string path, bool raw = false)
+        public DropboxContentWriter(DropboxServiceClient service, string path, bool raw = false, string? spoolDirectory = null)
         {
             _service = service;
             _path = path;
             _raw = raw;
-            _buffer = new MemoryStream();
-            // The text writer is created lazily on first write (after any append
-            // preload) so that, when appending, the buffer is already positioned past
-            // the existing content and StreamWriter suppresses the UTF-8 preamble
-            // instead of injecting a BOM into the middle of the file.
+            // Spool to a temp file (delete-on-close) so peak memory is bounded by the
+            // upload chunk size, not the whole file. The text writer is created lazily
+            // on first write (after any append preload) so that, when appending, the
+            // buffer is already positioned past the existing content and StreamWriter
+            // suppresses the UTF-8 preamble instead of injecting a BOM mid-file.
+            var directory = spoolDirectory ?? Path.GetTempPath();
+            var tempPath = Path.Combine(directory, "dbxupload-" + Guid.NewGuid().ToString("N") + ".tmp");
+            _buffer = new FileStream(tempPath, FileMode.CreateNew, FileAccess.ReadWrite,
+                FileShare.Read, 81920, FileOptions.DeleteOnClose);
         }
 
         public IList Write(IList content)
