@@ -35,6 +35,9 @@ on the next sync. The Validate Instructions workflow may also flag leaks.
 - `CLAUDE.project.md` -- copy from `CLAUDE.project.md.template` if missing.
   Auto-imported by Claude Code via the `@CLAUDE.project.md` line at the
   bottom of `CLAUDE.md`.
+- `README.md` -- copy from `README.md.template` if missing. Default
+  skeleton covers GitHub's five README questions (what / why / start /
+  help / who) using `##` headings so GitHub auto-generates the Outline.
 
 If a `*.template` file is present but the corresponding consumer-owned file
 is not, copy the template (drop the `.template` suffix) and fill in the
@@ -45,7 +48,7 @@ sections. `Pull-SDLC.ai.ps1` does this automatically on first sync.
 This is a **C#/.NET** project. Discover the project's purpose, architecture, and full
 technology stack from the solution/project files, `README.md`, and NuGet package references.
 
-Key baseline technologies: C# / .NET 9+, xUnit, Moq.
+Key baseline technologies: C# / .NET 10+, xUnit, Moq.
 
 ## Language Detection
 
@@ -83,6 +86,46 @@ README, and build files.
 - Use the project's existing linter / formatter. Run it after every change.
 - After **every step** (RED, GREEN, REFACTOR, or any code change), run the project's
   compile/lint command and verify there are no errors. Fix any errors before proceeding.
+
+## Adding Command-Line Options -- Prompt First
+
+New command-line options (flags, switches, positional arguments, environment-variable
+toggles, or other public CLI surface) are easy to add and hard to remove. Treat every
+new option as a deliberate API decision, not an implementation detail.
+
+- **STOP before adding any new command-line option.** Do not introduce a new flag,
+  switch, or argument silently as part of a larger change.
+- **First ask whether an option is needed at all.** Before proposing a new option,
+  consider making the new behavior the **default** instead:
+  - If the new behavior is simply better, change the default and do **not** keep the
+    old behavior behind a flag -- prefer replacing over accumulating options.
+  - Only keep both behaviors (and therefore an option) when there is a genuine,
+    ongoing need for each. Two options that no one needs are worse than one good default.
+- **Prompt the user with a recommendation first.** Surface the proposal and ask for
+  confirmation before implementing it. The recommendation should state:
+  - whether the change should be the new default (no option) or genuinely needs an option;
+  - if an option is proposed, the exact option name and what it does;
+  - the default behavior and any alternatives considered (prefer no new option -- YAGNI).
+- **Wait for explicit approval** before writing the option, its parsing, its help text,
+  or its tests.
+- This applies even in autopilot mode: a new CLI option is a design decision worth a
+  confirmation prompt rather than a unilateral assumption.
+
+## Pre-Production -- No Backwards Compatibility
+
+Until a project is explicitly marked as released to production, do **not** maintain
+backwards compatibility for its API or CLI surface.
+
+- **Default assumption: pre-production.** Treat a project as pre-production unless it
+  carries an explicit production/release marker (e.g., a statement in `README.md`, a
+  `1.0.0`+ release, a `project.instructions.md` note, or similar).
+- **Switch straight to the best design.** When you improve an API signature, CLI option,
+  or other public surface, replace the old form outright -- do not keep deprecated
+  aliases, shims, compatibility flags, or legacy code paths around.
+- **Don't clutter the eventual release.** The goal is a clean API/CLI at launch, with no
+  legacy cruft carried in from earlier iterations.
+- **Once production is declared, this rule no longer applies** -- from that point,
+  follow normal deprecation and backwards-compatibility discipline.
 
 ## Testing Conventions -- Generic
 
@@ -298,7 +341,9 @@ and branch names -- never plain-text references like `#131`.
 
 Every `task_complete` summary must include the following fields whenever the
 underlying data exists. Omit a field only when it does not apply to the work
-just performed (e.g., a Q&A turn with no PR).
+just performed (e.g., a Q&A turn with no PR). **Exception:** on every dev-loop
+run the **Result display** is mandatory and must not be omitted -- only the PR
+link may be dropped when no PR exists.
 
 | Field | Required format |
 |---|---|
@@ -306,6 +351,7 @@ just performed (e.g., a Q&A turn with no PR).
 | **Issue** | Full link: `[#NNN](https://github.com/<owner>/<repo>/issues/NNN)` |
 | **Branch** | Linked code span: `` [`<branch-name>`](https://github.com/<owner>/<repo>/tree/<branch-name>) `` |
 | **Command to test** | Exact shell command(s) the user can run locally to verify, fenced as a code block |
+| **Result display** | The actual result, so the user sees the change worked without re-running it. **Required on every dev-loop run.** For CLI/markdown changes render the real captured output **inline** (ANSI-stripped, fenced); for UI/binary changes a `file:///` link is sufficient. Omit the inline output only when the user opted out (`-SkipDisplay`), and then note it was skipped by user request. |
 | **Evidence (local)** | Clickable `file:///` URL to the entry-point file at `.evidence/<phase-id>/evidence.md` (printed by `Publish-Evidence.ps1`). Required when Phase 5b ran. |
 | **Evidence (PR)** | Link to the PR comment containing the captured runtime artifact, or to the CI-artifact URL for files larger than 25 MB. Required when Phase 5b ran and the PR exists. |
 
@@ -328,6 +374,11 @@ Example:
 - **PR**: [#57](https://github.com/owner/repo/pull/57) (merged)
 - **Branch**: [`feat/42-user-auth`](https://github.com/owner/repo/tree/feat/42-user-auth)
 - **Test**: `dotnet test --no-build`
+- **Result**:
+  ```text
+  > app auth --user alice
+  Authenticated alice (token expires in 3600s)
+  ```
 - **Evidence (local)**: file:///D:/Git/repo/.evidence/phase-5b-20260101T000000Z/evidence.md
 - **Evidence (PR)**: https://github.com/owner/repo/pull/57#issuecomment-1234567
 ```
