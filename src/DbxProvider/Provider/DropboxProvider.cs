@@ -518,6 +518,15 @@ namespace DbxProvider.Provider
                     WriteDropboxItemObject(item, providerPath, item.IsFolder);
                 }
             }
+            catch (PipelineStoppedException)
+            {
+                // A downstream cmdlet stopped the pipeline early (e.g.
+                // Select-Object -First) or the user pressed Ctrl+C. This is a
+                // cooperative stop, not an enumeration failure: let it propagate so
+                // the already-emitted items are preserved instead of being turned
+                // into a spurious "The pipeline has been stopped" error.
+                throw;
+            }
             catch (Exception ex)
             {
                 WriteError(new ErrorRecord(ex, "GetChildItemsFailed",
@@ -592,6 +601,12 @@ namespace DbxProvider.Provider
                 {
                     WriteItemObject(item.Name, item.Path.Replace('/', '\\').TrimStart('\\'), item.IsFolder);
                 }
+            }
+            catch (PipelineStoppedException)
+            {
+                // Cooperative pipeline stop (e.g. Select-Object -First / Ctrl+C):
+                // propagate it rather than reporting a GetChildNamesFailed error.
+                throw;
             }
             catch (Exception ex)
             {
