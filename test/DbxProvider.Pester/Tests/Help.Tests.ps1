@@ -63,4 +63,30 @@ Describe 'DbxProvider help' {
             $hasCode | Should -BeTrue
         }
     }
+
+    Context 'about_DbxProvider_Mode conceptual topic' {
+
+        It 'is discoverable via Get-Help' {
+            $text = Get-Help about_DbxProvider_Mode -ErrorAction Stop | Out-String
+            $text | Should -Not -BeNullOrEmpty
+            $text | Should -Match 'flag mask'
+        }
+
+        It 'documents the <Flag> flag (<Meaning>)' -ForEach @(
+            @{ Flag = 'd'; Meaning = 'Folder' }
+            @{ Flag = 's'; Meaning = 'Shared' }
+            @{ Flag = 'l'; Meaning = 'Symlink' }
+            @{ Flag = 'c'; Meaning = 'Cloud-only' }
+            @{ Flag = 'z'; Meaning = 'Zero-byte' }
+            @{ Flag = 'x'; Meaning = 'Conflicted copy' }
+        ) {
+            $text = Get-Help about_DbxProvider_Mode -ErrorAction Stop | Out-String
+            $text | Should -Match ([regex]::Escape($Meaning))
+        }
+
+        It 'shows the conflicted-copy filter example' {
+            $text = Get-Help about_DbxProvider_Mode -ErrorAction Stop | Out-String
+            $text | Should -Match "Where-Object Mode -match 'x'"
+        }
+    }
 }

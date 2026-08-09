@@ -116,6 +116,13 @@ Notes:
   table for `Get-ChildItem` output) and other module metadata. Importing the
   raw DLL loads the cmdlets but drops formatting, and `dir Dbx:\` then falls
   back to `Format-List` output (one property per line).
+  - The `Mode` column is a fixed-position flag mask (positions
+    `d s l c z x`): `d` folder, `s` shared, `l` symlink, `c` cloud-only
+    (not downloadable), `z` zero-byte file, `x` conflicted copy; `-` means the
+    flag is unset. It is a real `DropboxItem.Mode` property, so you can filter
+    on it -- e.g. `dir Dbx:\ -Recurse | Where-Object Mode -match 'x'` lists
+    conflicted copies. Example: a zero-byte conflicted copy renders `----zx`.
+    Review the full legend any time with `Get-Help about_DbxProvider_Mode`.
 - The DLL is loaded directly from `bin\`; nothing is copied.
 - That pwsh process now **locks** the DLL until it exits — the next
   `dotnet build` will fail until you close the session (or run
