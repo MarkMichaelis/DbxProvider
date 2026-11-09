@@ -43,6 +43,19 @@ jobs:
           }
           "version=$version" >> $env:GITHUB_OUTPUT
 
+      # This workflow only builds and smoke-imports; the real tests live in
+      # ci.yml. Refuse to publish a commit CI has not passed.
+      - name: Require a green CI run for the tagged commit
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $runs = gh run list --workflow ci.yml --commit $env:GITHUB_SHA --status success --json databaseId | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "Could not query CI runs (exit $LASTEXITCODE)." }
+          if (-not $runs) {
+            throw "No successful CI run for $env:GITHUB_SHA. Tag a commit on main after its CI run passes."
+          }
+
       - name: Build and stage module
         run: |
           $staging = Join-Path $env:RUNNER_TEMP 'modules'
@@ -64,11 +77,19 @@ jobs:
           name: DbxProvider-${{ steps.version.outputs.version }}
           path: ${{ env.ZIP_PATH }}
 
-      - name: Create GitHub release
+      - name: Create or update GitHub release
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create $env:GITHUB_REF_NAME $env:ZIP_PATH `
-            --title "DbxProvider $env:GITHUB_REF_NAME" `
-            --generate-notes
+          # A rerun (or a re-pushed tag) finds the release already there:
+          # replace its zip instead of failing on `gh release create`.
+          gh release view $env:GITHUB_REF_NAME *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:GITHUB_REF_NAME $env:ZIP_PATH --clobber
+          } else {
+            gh release create $env:GITHUB_REF_NAME $env:ZIP_PATH `
+              --title "DbxProvider $env:GITHUB_REF_NAME" `
+              --generate-notes
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Publishing the release failed (exit $LASTEXITCODE)." }
