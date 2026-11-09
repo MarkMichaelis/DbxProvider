@@ -1,0 +1,74 @@
+name: Release
+
+# Publishes the DbxProvider PowerShell module as a GitHub release when a tag of
+# the form `v*` is pushed (e.g. v1.0.0). The tag must match ModuleVersion in
+# src/DbxProvider/DbxProvider.psd1; bump that first, then tag.
+#
+# The release asset is DbxProvider-<version>.zip: the contents of the module's
+# version folder, laid out exactly as build/Install-Module.ps1 installs it.
+# Extract it to <Modules>\DbxProvider\<version> and `Import-Module DbxProvider`.
+#
+# A manual run (workflow_dispatch) builds and uploads the zip as a workflow
+# artifact only -- a dry run that creates no release.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # Windows, so the build copies the win-x64 native SQLite runtime that the
+    # target machines load (see the _DbxSqliteNative item in DbxProvider.csproj).
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Read module version
+        id: version
+        run: |
+          $psd1 = Import-PowerShellDataFile src/DbxProvider/DbxProvider.psd1
+          $version = $psd1.ModuleVersion
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag '$env:GITHUB_REF_NAME' does not match ModuleVersion '$version' (expected 'v$version')."
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Build and stage module
+        run: |
+          $staging = Join-Path $env:RUNNER_TEMP 'modules'
+          ./build/Install-Module.ps1 -Configuration Release -Destination $staging
+          $moduleDir = Join-Path $staging 'DbxProvider/${{ steps.version.outputs.version }}'
+          if (-not (Test-Path (Join-Path $moduleDir 'DbxProvider.psd1'))) {
+            throw "Staged module manifest not found under $moduleDir."
+          }
+          # Smoke test: the staged module imports in a clean process.
+          pwsh -NoProfile -Command "Import-Module '$moduleDir/DbxProvider.psd1' -ErrorAction Stop; if (-not (Get-Command Connect-Dropbox -ErrorAction SilentlyContinue)) { throw 'Connect-Dropbox not exported.' }"
+          if ($LASTEXITCODE -ne 0) { throw "Import smoke test failed." }
+          $zip = Join-Path $env:RUNNER_TEMP 'DbxProvider-${{ steps.version.outputs.version }}.zip'
+          Compress-Archive -Path (Join-Path $moduleDir '*') -DestinationPath $zip -Force
+          "ZIP_PATH=$zip" >> $env:GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DbxProvider-${{ steps.version.outputs.version }}
+          path: ${{ env.ZIP_PATH }}
+
+      - name: Create GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create $env:GITHUB_REF_NAME $env:ZIP_PATH `
+            --title "DbxProvider $env:GITHUB_REF_NAME" `
+            --generate-notes
